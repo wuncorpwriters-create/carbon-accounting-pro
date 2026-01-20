@@ -47,7 +47,7 @@ const MonthlyCarbonTracker: React.FC = () => {
               onChange={(event) =>
                 setInputs((prev) => ({
                   ...prev,
-                  electricityKwh: Number(event.target.value),
+                  electricityKwh: Number(event.target.value) || 0,
                 }))
               }
             />
@@ -60,7 +60,7 @@ const MonthlyCarbonTracker: React.FC = () => {
               onChange={(event) =>
                 setInputs((prev) => ({
                   ...prev,
-                  fuelLiters: Number(event.target.value),
+                  fuelLiters: Number(event.target.value) || 0,
                 }))
               }
             />
@@ -73,7 +73,7 @@ const MonthlyCarbonTracker: React.FC = () => {
               onChange={(event) =>
                 setInputs((prev) => ({
                   ...prev,
-                  vehicleKm: Number(event.target.value),
+                  vehicleKm: Number(event.target.value) || 0,
                 }))
               }
             />
