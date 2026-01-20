@@ -217,6 +217,8 @@ const MonthlyCarbonTracker: React.FC = () => {
     writtenPolicies: [],
     dataConfidence: "",
   });
+  const [reportGenerated, setReportGenerated] = useState(false);
+  const [reportSnapshot, setReportSnapshot] = useState<ReportInputs | null>(null);
 
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isPaid, setIsPaid] = useState(false);
@@ -224,18 +226,122 @@ const MonthlyCarbonTracker: React.FC = () => {
   const [selectedPlan, setSelectedPlan] = useState("one-off");
   const [hasSaved, setHasSaved] = useState(false);
 
-  const emissions = emissionCalculation(inputs);
-  const scores = scoreCalculation(inputs);
+  const reportEmissions = useMemo(
+    () => (reportSnapshot ? emissionCalculation(reportSnapshot) : null),
+    [reportSnapshot]
+  );
+  const reportScores = useMemo(
+    () => (reportSnapshot ? scoreCalculation(reportSnapshot) : null),
+    [reportSnapshot]
+  );
   const reportDate = new Date().toLocaleDateString();
   const reportVersion = "v1.0";
 
-  const reportPayload = useMemo(
-    () => ({
-      report_id: reportId,
-      inputs,
-    }),
-    [inputs, reportId]
-  );
+  const reportSummaryItems = reportSnapshot
+    ? [
+        { label: "Company", value: reportSnapshot.companyName || "Not provided" },
+        { label: "Country", value: reportSnapshot.country || "Not provided" },
+        { label: "Industry", value: reportSnapshot.industry || "Not provided" },
+        { label: "Employees", value: reportSnapshot.employeeRange || "Not provided" },
+        { label: "Reporting period", value: reportSnapshot.reportingPeriod || "Not provided" },
+        {
+          label: "Fuel usage",
+          value:
+            reportSnapshot.consumesFuel === "yes"
+              ? `${reportSnapshot.totalFuelLiters || "Not provided"} litres`
+              : reportSnapshot.consumesFuel === "no"
+                ? "No"
+                : "Not specified",
+        },
+        {
+          label: "Fuel types",
+          value: reportSnapshot.fuelTypes.length
+            ? reportSnapshot.fuelTypes.map((fuel) => fuel.replace(/^\w/, (c) => c.toUpperCase())).join(", ")
+            : "Not specified",
+        },
+        {
+          label: "Primary fuel use",
+          value: reportSnapshot.primaryFuelUse || "Not specified",
+        },
+        {
+          label: "Grid electricity",
+          value:
+            reportSnapshot.usesGridElectricity === "yes"
+              ? `${reportSnapshot.electricityUsageKwh || "Not provided"} kWh (${reportSnapshot.electricityUsagePeriod})`
+              : reportSnapshot.usesGridElectricity === "no"
+                ? "No"
+                : "Not specified",
+        },
+        { label: "Facilities", value: reportSnapshot.facilityCount || "Not specified" },
+        {
+          label: "Backup power",
+          value:
+            reportSnapshot.usesBackupPower === "yes"
+              ? "Yes"
+              : reportSnapshot.usesBackupPower === "no"
+                ? "No"
+                : "Not specified",
+        },
+        {
+          label: "Water usage tracking",
+          value:
+            reportSnapshot.tracksWaterUsage === "yes"
+              ? "Yes"
+              : reportSnapshot.tracksWaterUsage === "estimate"
+                ? "Estimated"
+                : reportSnapshot.tracksWaterUsage === "no"
+                  ? "No"
+                  : "Not specified",
+        },
+        {
+          label: "Estimated water usage",
+          value: reportSnapshot.estimatedWaterUsage || "Not specified",
+        },
+        {
+          label: "Health & safety practices",
+          value:
+            reportSnapshot.healthSafetyPractices === "yes"
+              ? "Yes"
+              : reportSnapshot.healthSafetyPractices === "no"
+                ? "No"
+                : "Not specified",
+        },
+        {
+          label: "Training provided",
+          value:
+            reportSnapshot.trainingProvided === "yes"
+              ? "Yes"
+              : reportSnapshot.trainingProvided === "no"
+                ? "No"
+                : "Not specified",
+        },
+        {
+          label: "Female workforce %",
+          value: reportSnapshot.femaleWorkforcePercent || "Not specified",
+        },
+        {
+          label: "Business registered",
+          value:
+            reportSnapshot.businessRegistered === "yes"
+              ? "Yes"
+              : reportSnapshot.businessRegistered === "no"
+                ? "No"
+                : "Not specified",
+        },
+        {
+          label: "Management structure",
+          value: reportSnapshot.managementStructure || "Not specified",
+        },
+        {
+          label: "Written policies",
+          value: reportSnapshot.writtenPolicies.length
+            ? reportSnapshot.writtenPolicies
+                .map((policy) => policy.replace(/^\w/, (c) => c.toUpperCase()))
+                .join(", ")
+            : "Not specified",
+        },
+      ]
+    : [];
 
   const handleTogglePolicy = (value: string) => {
     setInputs((prev) => {
@@ -268,6 +374,15 @@ const MonthlyCarbonTracker: React.FC = () => {
     setHasSaved(true);
   };
 
+  const handleGenerateReport = () => {
+    setReportSnapshot({
+      ...inputs,
+      fuelTypes: [...inputs.fuelTypes],
+      writtenPolicies: [...inputs.writtenPolicies],
+    });
+    setReportGenerated(true);
+  };
+
   const handleDownloadPdf = () => {
     if (!isSignedIn) {
       setActiveModal("signup");
@@ -278,27 +393,31 @@ const MonthlyCarbonTracker: React.FC = () => {
       return;
     }
 
+    const pdfInputs = reportSnapshot ?? inputs;
+    const pdfEmissions = emissionCalculation(pdfInputs);
+    const pdfScores = scoreCalculation(pdfInputs);
+
     const pdfPages = [
       [
         "Cover",
         `Report ID: ${reportId}`,
-        `Prepared for: ${inputs.companyName || "Company"}`,
+        `Prepared for: ${pdfInputs.companyName || "Company"}`,
         `Date: ${reportDate}`,
         `Version: ${reportVersion}`,
       ],
       [
         "Executive summary",
-        `Total emissions: ${emissions.totalEmissions} tCO2e`,
-        `Primary driver: ${emissions.primaryDriver}`,
-        `Environmental grade: ${scores.environmentalGrade}`,
-        `Social grade: ${scores.socialGrade}`,
-        `Governance grade: ${scores.governanceGrade}`,
+        `Total emissions: ${pdfEmissions.totalEmissions} tCO2e`,
+        `Primary driver: ${pdfEmissions.primaryDriver}`,
+        `Environmental grade: ${pdfScores.environmentalGrade}`,
+        `Social grade: ${pdfScores.socialGrade}`,
+        `Governance grade: ${pdfScores.governanceGrade}`,
       ],
       [
         "Environmental overview",
         "Charts: emissions by activity, fuel vs electricity",
-        `Fuel emissions: ${emissions.fuelEmissions} tCO2e`,
-        `Electricity emissions: ${emissions.electricityEmissions} tCO2e`,
+        `Fuel emissions: ${pdfEmissions.fuelEmissions} tCO2e`,
+        `Electricity emissions: ${pdfEmissions.electricityEmissions} tCO2e`,
       ],
       [
         "Scope & boundary",
@@ -307,17 +426,17 @@ const MonthlyCarbonTracker: React.FC = () => {
       ],
       [
         "ESG snapshot",
-        `Environmental score: ${scores.environmentalScore}/8 (${scores.environmentalGrade})`,
-        `Social score: ${scores.socialScore}/6 (${scores.socialGrade})`,
-        `Governance score: ${scores.governanceScore}/6 (${scores.governanceGrade})`,
-        `Data confidence: ${inputs.dataConfidence || "Not specified"}`,
+        `Environmental score: ${pdfScores.environmentalScore}/8 (${pdfScores.environmentalGrade})`,
+        `Social score: ${pdfScores.socialScore}/6 (${pdfScores.socialGrade})`,
+        `Governance score: ${pdfScores.governanceScore}/6 (${pdfScores.governanceGrade})`,
+        `Data confidence: ${pdfInputs.dataConfidence || "Not specified"}`,
       ],
       [
         "Data inputs summary",
-        `Company: ${inputs.companyName || "Not provided"}`,
-        `Industry: ${inputs.industry || "Not provided"}`,
-        `Employees: ${inputs.employeeRange || "Not provided"}`,
-        `Reporting period: ${inputs.reportingPeriod || "Not provided"}`,
+        `Company: ${pdfInputs.companyName || "Not provided"}`,
+        `Industry: ${pdfInputs.industry || "Not provided"}`,
+        `Employees: ${pdfInputs.employeeRange || "Not provided"}`,
+        `Reporting period: ${pdfInputs.reportingPeriod || "Not provided"}`,
       ],
       [
         "Methodology & assumptions",
@@ -344,17 +463,24 @@ const MonthlyCarbonTracker: React.FC = () => {
   };
 
   const interpretationText =
-    emissions.totalEmissions === 0
+    reportEmissions?.totalEmissions === 0
       ? "Add fuel or electricity data to generate emissions insights."
-      : `${emissions.primaryDriver} is the largest contributor at ${
-          emissions.primaryDriver === "Fuel consumption"
-            ? emissions.fuelEmissions
-            : emissions.electricityEmissions
-        } tCO2e. Focus efficiency actions here to reduce total emissions.`;
+      : reportEmissions
+        ? `${reportEmissions.primaryDriver} is the largest contributor at ${
+            reportEmissions.primaryDriver === "Fuel consumption"
+              ? reportEmissions.fuelEmissions
+              : reportEmissions.electricityEmissions
+          } tCO2e. Focus efficiency actions here to reduce total emissions.`
+        : "";
 
-  const maxEmission = Math.max(emissions.fuelEmissions, emissions.electricityEmissions, 1);
-  const fuelShare =
-    emissions.totalEmissions === 0 ? 0 : (emissions.fuelEmissions / emissions.totalEmissions) * 100;
+  const maxEmission = reportEmissions
+    ? Math.max(reportEmissions.fuelEmissions, reportEmissions.electricityEmissions, 1)
+    : 1;
+  const fuelShare = reportEmissions
+    ? reportEmissions.totalEmissions === 0
+      ? 0
+      : (reportEmissions.fuelEmissions / reportEmissions.totalEmissions) * 100
+    : 0;
 
   const actions = [
     "Identify efficiency opportunities tied to your primary emission driver.",
@@ -388,449 +514,482 @@ const MonthlyCarbonTracker: React.FC = () => {
         </div>
       </header>
 
-      <section className="esg-snapshot__form" aria-label="ESG questionnaire">
-        <div className="esg-snapshot__section">
-          <h2>Section 1: Company profile</h2>
-          <div className="esg-snapshot__grid">
-            <label>
-              Company name
-              <input
-                type="text"
-                value={inputs.companyName}
-                onChange={(event) => setInputs({ ...inputs, companyName: event.target.value })}
-              />
-            </label>
-            <label>
-              Country
-              <select
-                value={inputs.country}
-                onChange={(event) => setInputs({ ...inputs, country: event.target.value })}
-              >
-                <option value="">Select country</option>
-                {countries.map((country) => (
-                  <option key={country} value={country}>
-                    {country}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Industry
-              <select
-                value={inputs.industry}
-                onChange={(event) => setInputs({ ...inputs, industry: event.target.value })}
-              >
-                <option value="">Select industry</option>
-                {industries.map((industry) => (
-                  <option key={industry} value={industry}>
-                    {industry}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Number of employees
-              <select
-                value={inputs.employeeRange}
-                onChange={(event) => setInputs({ ...inputs, employeeRange: event.target.value })}
-              >
-                <option value="">Select range</option>
-                <option value="1-10">1–10</option>
-                <option value="11-50">11–50</option>
-                <option value="51-250">51–250</option>
-                <option value="250+">250+</option>
-              </select>
-            </label>
-            <label>
-              Reporting period
-              <input
-                type="text"
-                placeholder="Year or last 12 months"
-                value={inputs.reportingPeriod}
-                onChange={(event) => setInputs({ ...inputs, reportingPeriod: event.target.value })}
-              />
-            </label>
-          </div>
-        </div>
-
-        <div className="esg-snapshot__section">
-          <h2>Section 2: Fuel consumption (Scope 1)</h2>
-          <label>
-            Does the company consume fuel?
-            <select
-              value={inputs.consumesFuel}
-              onChange={(event) => setInputs({ ...inputs, consumesFuel: event.target.value })}
-            >
-              <option value="">Select</option>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </label>
-          {inputs.consumesFuel === "yes" ? (
+      {!reportGenerated ? (
+        <section className="esg-snapshot__form" aria-label="ESG questionnaire">
+          <div className="esg-snapshot__section">
+            <h2>Section 1: Company profile</h2>
             <div className="esg-snapshot__grid">
-              <fieldset>
-                <legend>Fuel types</legend>
-                {[
-                  { value: "petrol", label: "Petrol" },
-                  { value: "diesel", label: "Diesel" },
-                  { value: "lpg", label: "LPG" },
-                  { value: "other", label: "Other" },
-                ].map((option) => (
-                  <label key={option.value}>
-                    <input
-                      type="checkbox"
-                      checked={inputs.fuelTypes.includes(option.value)}
-                      onChange={() => handleToggleFuelType(option.value)}
-                    />
-                    {option.label}
-                  </label>
-                ))}
-              </fieldset>
               <label>
-                Total fuel consumed (litres)
+                Company name
                 <input
-                  type="number"
-                  value={inputs.totalFuelLiters}
-                  onChange={(event) => setInputs({ ...inputs, totalFuelLiters: event.target.value })}
+                  type="text"
+                  value={inputs.companyName}
+                  onChange={(event) => setInputs({ ...inputs, companyName: event.target.value })}
                 />
               </label>
               <label>
-                Primary fuel use
+                Country
                 <select
-                  value={inputs.primaryFuelUse}
-                  onChange={(event) => setInputs({ ...inputs, primaryFuelUse: event.target.value })}
+                  value={inputs.country}
+                  onChange={(event) => setInputs({ ...inputs, country: event.target.value })}
                 >
-                  <option value="">Select</option>
-                  <option value="vehicles">Vehicles</option>
-                  <option value="machinery">Machinery</option>
-                  <option value="generators">Generators</option>
-                  <option value="logistics">Logistics</option>
+                  <option value="">Select country</option>
+                  {countries.map((country) => (
+                    <option key={country} value={country}>
+                      {country}
+                    </option>
+                  ))}
                 </select>
+              </label>
+              <label>
+                Industry
+                <select
+                  value={inputs.industry}
+                  onChange={(event) => setInputs({ ...inputs, industry: event.target.value })}
+                >
+                  <option value="">Select industry</option>
+                  {industries.map((industry) => (
+                    <option key={industry} value={industry}>
+                      {industry}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Number of employees
+                <select
+                  value={inputs.employeeRange}
+                  onChange={(event) => setInputs({ ...inputs, employeeRange: event.target.value })}
+                >
+                  <option value="">Select range</option>
+                  <option value="1-10">1–10</option>
+                  <option value="11-50">11–50</option>
+                  <option value="51-250">51–250</option>
+                  <option value="250+">250+</option>
+                </select>
+              </label>
+              <label>
+                Reporting period
+                <input
+                  type="text"
+                  placeholder="Year or last 12 months"
+                  value={inputs.reportingPeriod}
+                  onChange={(event) => setInputs({ ...inputs, reportingPeriod: event.target.value })}
+                />
               </label>
             </div>
-          ) : null}
-        </div>
+          </div>
 
-        <div className="esg-snapshot__section">
-          <h2>Section 3: Electricity usage (Scope 2)</h2>
-          <label>
-            Uses grid electricity?
-            <select
-              value={inputs.usesGridElectricity}
-              onChange={(event) => setInputs({ ...inputs, usesGridElectricity: event.target.value })}
-            >
-              <option value="">Select</option>
-              <option value="yes">Yes</option>
-              <option value="no">No</option>
-            </select>
-          </label>
-          {inputs.usesGridElectricity === "yes" ? (
+          <div className="esg-snapshot__section">
+            <h2>Section 2: Fuel consumption (Scope 1)</h2>
+            <label>
+              Does the company consume fuel?
+              <select
+                value={inputs.consumesFuel}
+                onChange={(event) => setInputs({ ...inputs, consumesFuel: event.target.value })}
+              >
+                <option value="">Select</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </label>
+            {inputs.consumesFuel === "yes" ? (
+              <div className="esg-snapshot__grid">
+                <fieldset>
+                  <legend>Fuel types</legend>
+                  {[
+                    { value: "petrol", label: "Petrol" },
+                    { value: "diesel", label: "Diesel" },
+                    { value: "lpg", label: "LPG" },
+                    { value: "other", label: "Other" },
+                  ].map((option) => (
+                    <label key={option.value}>
+                      <input
+                        type="checkbox"
+                        checked={inputs.fuelTypes.includes(option.value)}
+                        onChange={() => handleToggleFuelType(option.value)}
+                      />
+                      {option.label}
+                    </label>
+                  ))}
+                </fieldset>
+                <label>
+                  Total fuel consumed (litres)
+                  <input
+                    type="number"
+                    value={inputs.totalFuelLiters}
+                    onChange={(event) =>
+                      setInputs({ ...inputs, totalFuelLiters: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Primary fuel use
+                  <select
+                    value={inputs.primaryFuelUse}
+                    onChange={(event) => setInputs({ ...inputs, primaryFuelUse: event.target.value })}
+                  >
+                    <option value="">Select</option>
+                    <option value="vehicles">Vehicles</option>
+                    <option value="machinery">Machinery</option>
+                    <option value="generators">Generators</option>
+                    <option value="logistics">Logistics</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="esg-snapshot__section">
+            <h2>Section 3: Electricity usage (Scope 2)</h2>
+            <label>
+              Uses grid electricity?
+              <select
+                value={inputs.usesGridElectricity}
+                onChange={(event) =>
+                  setInputs({ ...inputs, usesGridElectricity: event.target.value })
+                }
+              >
+                <option value="">Select</option>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </label>
+            {inputs.usesGridElectricity === "yes" ? (
+              <div className="esg-snapshot__grid">
+                <label>
+                  Electricity consumption (kWh)
+                  <input
+                    type="number"
+                    value={inputs.electricityUsageKwh}
+                    onChange={(event) =>
+                      setInputs({ ...inputs, electricityUsageKwh: event.target.value })
+                    }
+                  />
+                </label>
+                <label>
+                  Consumption period
+                  <select
+                    value={inputs.electricityUsagePeriod}
+                    onChange={(event) =>
+                      setInputs({ ...inputs, electricityUsagePeriod: event.target.value })
+                    }
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="annual">Annual</option>
+                  </select>
+                </label>
+                <label>
+                  Number of facilities
+                  <select
+                    value={inputs.facilityCount}
+                    onChange={(event) => setInputs({ ...inputs, facilityCount: event.target.value })}
+                  >
+                    <option value="">Select</option>
+                    <option value="1">1</option>
+                    <option value="2-5">2–5</option>
+                    <option value="6+">6+</option>
+                  </select>
+                </label>
+                <label>
+                  Uses backup power?
+                  <select
+                    value={inputs.usesBackupPower}
+                    onChange={(event) => setInputs({ ...inputs, usesBackupPower: event.target.value })}
+                  >
+                    <option value="">Select</option>
+                    <option value="yes">Yes</option>
+                    <option value="no">No</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="esg-snapshot__section">
+            <h2>Section 4: Water usage (Light ESG)</h2>
             <div className="esg-snapshot__grid">
               <label>
-                Electricity consumption (kWh)
-                <input
-                  type="number"
-                  value={inputs.electricityUsageKwh}
+                Tracks water usage?
+                <select
+                  value={inputs.tracksWaterUsage}
                   onChange={(event) =>
-                    setInputs({ ...inputs, electricityUsageKwh: event.target.value })
+                    setInputs({ ...inputs, tracksWaterUsage: event.target.value })
+                  }
+                >
+                  <option value="">Select</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                  <option value="estimate">Estimate</option>
+                </select>
+              </label>
+              <label>
+                Estimated water usage (optional)
+                <input
+                  type="text"
+                  value={inputs.estimatedWaterUsage}
+                  onChange={(event) =>
+                    setInputs({ ...inputs, estimatedWaterUsage: event.target.value })
                   }
                 />
               </label>
+            </div>
+          </div>
+
+          <div className="esg-snapshot__section">
+            <h2>Section 5: Social</h2>
+            <div className="esg-snapshot__grid">
               <label>
-                Consumption period
+                Employee count (auto-filled)
+                <input type="text" value={inputs.employeeRange || "Not specified"} readOnly />
+              </label>
+              <label>
+                Health & safety practices in place?
                 <select
-                  value={inputs.electricityUsagePeriod}
+                  value={inputs.healthSafetyPractices}
                   onChange={(event) =>
-                    setInputs({ ...inputs, electricityUsagePeriod: event.target.value })
+                    setInputs({ ...inputs, healthSafetyPractices: event.target.value })
                   }
-                >
-                  <option value="monthly">Monthly</option>
-                  <option value="annual">Annual</option>
-                </select>
-              </label>
-              <label>
-                Number of facilities
-                <select
-                  value={inputs.facilityCount}
-                  onChange={(event) => setInputs({ ...inputs, facilityCount: event.target.value })}
-                >
-                  <option value="">Select</option>
-                  <option value="1">1</option>
-                  <option value="2-5">2–5</option>
-                  <option value="6+">6+</option>
-                </select>
-              </label>
-              <label>
-                Uses backup power?
-                <select
-                  value={inputs.usesBackupPower}
-                  onChange={(event) => setInputs({ ...inputs, usesBackupPower: event.target.value })}
                 >
                   <option value="">Select</option>
                   <option value="yes">Yes</option>
                   <option value="no">No</option>
                 </select>
               </label>
+              <label>
+                Training provided to employees?
+                <select
+                  value={inputs.trainingProvided}
+                  onChange={(event) =>
+                    setInputs({ ...inputs, trainingProvided: event.target.value })
+                  }
+                >
+                  <option value="">Select</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+              <label>
+                Female workforce % (optional)
+                <input
+                  type="number"
+                  value={inputs.femaleWorkforcePercent}
+                  onChange={(event) =>
+                    setInputs({ ...inputs, femaleWorkforcePercent: event.target.value })
+                  }
+                />
+              </label>
             </div>
-          ) : null}
-        </div>
+          </div>
 
-        <div className="esg-snapshot__section">
-          <h2>Section 4: Water usage (Light ESG)</h2>
-          <div className="esg-snapshot__grid">
+          <div className="esg-snapshot__section">
+            <h2>Section 6: Governance</h2>
+            <div className="esg-snapshot__grid">
+              <label>
+                Business legally registered?
+                <select
+                  value={inputs.businessRegistered}
+                  onChange={(event) =>
+                    setInputs({ ...inputs, businessRegistered: event.target.value })
+                  }
+                >
+                  <option value="">Select</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+              <label>
+                Management structure
+                <select
+                  value={inputs.managementStructure}
+                  onChange={(event) =>
+                    setInputs({ ...inputs, managementStructure: event.target.value })
+                  }
+                >
+                  <option value="">Select</option>
+                  <option value="owner-managed">Owner-managed</option>
+                  <option value="management-team">Management team</option>
+                  <option value="board">Board</option>
+                </select>
+              </label>
+              <fieldset>
+                <legend>Written policies</legend>
+                {[
+                  { value: "ethics", label: "Ethics" },
+                  { value: "anti-corruption", label: "Anti-corruption" },
+                  { value: "none", label: "None" },
+                ].map((option) => (
+                  <label key={option.value}>
+                    <input
+                      type="checkbox"
+                      checked={inputs.writtenPolicies.includes(option.value)}
+                      onChange={() => handleTogglePolicy(option.value)}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </fieldset>
+            </div>
+          </div>
+
+          <div className="esg-snapshot__section">
+            <h2>Section 7: Data confidence</h2>
             <label>
-              Tracks water usage?
+              Data confidence
               <select
-                value={inputs.tracksWaterUsage}
-                onChange={(event) => setInputs({ ...inputs, tracksWaterUsage: event.target.value })}
+                value={inputs.dataConfidence}
+                onChange={(event) => setInputs({ ...inputs, dataConfidence: event.target.value })}
               >
                 <option value="">Select</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-                <option value="estimate">Estimate</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
               </select>
-            </label>
-            <label>
-              Estimated water usage (optional)
-              <input
-                type="text"
-                value={inputs.estimatedWaterUsage}
-                onChange={(event) =>
-                  setInputs({ ...inputs, estimatedWaterUsage: event.target.value })
-                }
-              />
             </label>
           </div>
-        </div>
-
-        <div className="esg-snapshot__section">
-          <h2>Section 5: Social</h2>
-          <div className="esg-snapshot__grid">
-            <label>
-              Employee count (auto-filled)
-              <input type="text" value={inputs.employeeRange || "Not specified"} readOnly />
-            </label>
-            <label>
-              Health & safety practices in place?
-              <select
-                value={inputs.healthSafetyPractices}
-                onChange={(event) =>
-                  setInputs({ ...inputs, healthSafetyPractices: event.target.value })
-                }
-              >
-                <option value="">Select</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </label>
-            <label>
-              Training provided to employees?
-              <select
-                value={inputs.trainingProvided}
-                onChange={(event) => setInputs({ ...inputs, trainingProvided: event.target.value })}
-              >
-                <option value="">Select</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </label>
-            <label>
-              Female workforce % (optional)
-              <input
-                type="number"
-                value={inputs.femaleWorkforcePercent}
-                onChange={(event) =>
-                  setInputs({ ...inputs, femaleWorkforcePercent: event.target.value })
-                }
-              />
-            </label>
-          </div>
-        </div>
-
-        <div className="esg-snapshot__section">
-          <h2>Section 6: Governance</h2>
-          <div className="esg-snapshot__grid">
-            <label>
-              Business legally registered?
-              <select
-                value={inputs.businessRegistered}
-                onChange={(event) => setInputs({ ...inputs, businessRegistered: event.target.value })}
-              >
-                <option value="">Select</option>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </select>
-            </label>
-            <label>
-              Management structure
-              <select
-                value={inputs.managementStructure}
-                onChange={(event) =>
-                  setInputs({ ...inputs, managementStructure: event.target.value })
-                }
-              >
-                <option value="">Select</option>
-                <option value="owner-managed">Owner-managed</option>
-                <option value="management-team">Management team</option>
-                <option value="board">Board</option>
-              </select>
-            </label>
-            <fieldset>
-              <legend>Written policies</legend>
-              {[
-                { value: "ethics", label: "Ethics" },
-                { value: "anti-corruption", label: "Anti-corruption" },
-                { value: "none", label: "None" },
-              ].map((option) => (
-                <label key={option.value}>
-                  <input
-                    type="checkbox"
-                    checked={inputs.writtenPolicies.includes(option.value)}
-                    onChange={() => handleTogglePolicy(option.value)}
-                  />
-                  {option.label}
-                </label>
-              ))}
-            </fieldset>
-          </div>
-        </div>
-
-        <div className="esg-snapshot__section">
-          <h2>Section 7: Data confidence</h2>
-          <label>
-            Data confidence
-            <select
-              value={inputs.dataConfidence}
-              onChange={(event) => setInputs({ ...inputs, dataConfidence: event.target.value })}
+          <div className="esg-snapshot__actions">
+            <button
+              className="esg-snapshot__button esg-snapshot__button--primary"
+              type="button"
+              onClick={handleGenerateReport}
             >
-              <option value="">Select</option>
-              <option value="high">High</option>
-              <option value="medium">Medium</option>
-              <option value="low">Low</option>
-            </select>
-          </label>
-        </div>
-      </section>
-
-      <section className="esg-report" aria-label="ESG report viewer">
-        <h2>ESG & emissions report</h2>
-        <p className="esg-report__subtitle">Read-only report viewer generated from your inputs.</p>
-
-        <div className="esg-report__kpis">
-          <div className="esg-report__kpi">
-            <h3>Total emissions</h3>
-            <p>{emissions.totalEmissions} tCO2e</p>
+              Generate ESG Report
+            </button>
           </div>
-          <div className="esg-report__kpi">
-            <h3>Primary emission driver</h3>
-            <p>{emissions.primaryDriver}</p>
+        </section>
+      ) : null}
+
+      {reportGenerated && reportSnapshot && reportEmissions && reportScores ? (
+        <section className="esg-report" aria-label="ESG report viewer">
+          <p className="esg-report__eyebrow">Generated ESG &amp; Emissions Snapshot Report</p>
+          <h2>ESG &amp; emissions report</h2>
+          <p className="esg-report__subtitle">Read-only report viewer generated from your inputs.</p>
+
+          <div className="esg-report__kpis">
+            <div className="esg-report__kpi">
+              <h3>Total emissions</h3>
+              <p>{reportEmissions.totalEmissions} tCO2e</p>
+            </div>
+            <div className="esg-report__kpi">
+              <h3>Primary emission driver</h3>
+              <p>{reportEmissions.primaryDriver}</p>
+            </div>
+            <div className="esg-report__kpi">
+              <h3>ESG grades</h3>
+              <p>
+                E: {reportScores.environmentalGrade} · S: {reportScores.socialGrade} · G:{" "}
+                {reportScores.governanceGrade}
+              </p>
+            </div>
+            <div className="esg-report__kpi">
+              <h3>Data confidence</h3>
+              <p>{reportSnapshot.dataConfidence ? reportSnapshot.dataConfidence : "Not specified"}</p>
+            </div>
           </div>
-          <div className="esg-report__kpi">
-            <h3>ESG grades</h3>
+
+          <div className="esg-report__charts">
+            <div className="esg-report__chart">
+              <h3>Emissions by activity</h3>
+              <div className="esg-report__bar-chart">
+                <div className="esg-report__bar">
+                  <span>Fuel</span>
+                  <div className="esg-report__bar-track">
+                    <div
+                      className="esg-report__bar-fill"
+                      style={{ width: `${(reportEmissions.fuelEmissions / maxEmission) * 100}%` }}
+                    />
+                  </div>
+                  <strong>{reportEmissions.fuelEmissions} tCO2e</strong>
+                </div>
+                <div className="esg-report__bar">
+                  <span>Electricity</span>
+                  <div className="esg-report__bar-track">
+                    <div
+                      className="esg-report__bar-fill esg-report__bar-fill--alt"
+                      style={{
+                        width: `${(reportEmissions.electricityEmissions / maxEmission) * 100}%`,
+                      }}
+                    />
+                  </div>
+                  <strong>{reportEmissions.electricityEmissions} tCO2e</strong>
+                </div>
+              </div>
+            </div>
+            <div className="esg-report__chart">
+              <h3>Fuel vs electricity</h3>
+              <div
+                className="esg-report__donut"
+                style={{
+                  background:
+                    reportEmissions.totalEmissions === 0
+                      ? "#dfe6f3"
+                      : `conic-gradient(#1b3a57 ${fuelShare}%, #7aa7c7 ${fuelShare}% 100%)`,
+                }}
+              >
+                <span>{Math.round(fuelShare)}% fuel</span>
+              </div>
+              <p className="esg-report__legend">Electricity share: {Math.round(100 - fuelShare)}%</p>
+            </div>
+            <div className="esg-report__chart">
+              <h3>Interpretation</h3>
+              <p>{interpretationText}</p>
+            </div>
+          </div>
+
+          <div className="esg-report__lower">
+            <div className="esg-report__scorecard">
+              <h3>ESG scorecard</h3>
+              <ul>
+                <li>
+                  Environmental: {reportScores.environmentalScore}/8 ({reportScores.environmentalGrade})
+                </li>
+                <li>
+                  Social: {reportScores.socialScore}/6 ({reportScores.socialGrade})
+                </li>
+                <li>
+                  Governance: {reportScores.governanceScore}/6 ({reportScores.governanceGrade})
+                </li>
+              </ul>
+            </div>
+            <div className="esg-report__actions">
+              <h3>Targets & actions</h3>
+              <ul>
+                {actions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="esg-report__expandables">
+            <details>
+              <summary>Data inputs summary</summary>
+              <ul>
+                {reportSummaryItems.map((item) => (
+                  <li key={item.label}>
+                    <strong>{item.label}:</strong> {item.value}
+                  </li>
+                ))}
+              </ul>
+            </details>
+            <details>
+              <summary>Methodology &amp; assumptions</summary>
+              <ul>
+                <li>Conservative emissions assumptions are applied for fuel and electricity.</li>
+                <li>Results are rounded to whole numbers.</li>
+                <li>This is a self-reported, non-audited ESG baseline.</li>
+              </ul>
+            </details>
+          </div>
+
+          <div className="esg-report__disclaimer">
+            <p>Self-reported data only. Not audited or certified.</p>
             <p>
-              E: {scores.environmentalGrade} · S: {scores.socialGrade} · G: {scores.governanceGrade}
+              Version {reportVersion} · {reportDate}
             </p>
           </div>
-          <div className="esg-report__kpi">
-            <h3>Data confidence</h3>
-            <p>{inputs.dataConfidence ? inputs.dataConfidence : "Not specified"}</p>
-          </div>
-        </div>
-
-        <div className="esg-report__charts">
-          <div className="esg-report__chart">
-            <h3>Emissions by activity</h3>
-            <div className="esg-report__bar-chart">
-              <div className="esg-report__bar">
-                <span>Fuel</span>
-                <div className="esg-report__bar-track">
-                  <div
-                    className="esg-report__bar-fill"
-                    style={{ width: `${(emissions.fuelEmissions / maxEmission) * 100}%` }}
-                  />
-                </div>
-                <strong>{emissions.fuelEmissions} tCO2e</strong>
-              </div>
-              <div className="esg-report__bar">
-                <span>Electricity</span>
-                <div className="esg-report__bar-track">
-                  <div
-                    className="esg-report__bar-fill esg-report__bar-fill--alt"
-                    style={{ width: `${(emissions.electricityEmissions / maxEmission) * 100}%` }}
-                  />
-                </div>
-                <strong>{emissions.electricityEmissions} tCO2e</strong>
-              </div>
-            </div>
-          </div>
-          <div className="esg-report__chart">
-            <h3>Fuel vs electricity</h3>
-            <div
-              className="esg-report__donut"
-              style={{
-                background:
-                  emissions.totalEmissions === 0
-                    ? "#dfe6f3"
-                    : `conic-gradient(#1b3a57 ${fuelShare}%, #7aa7c7 ${fuelShare}% 100%)`,
-              }}
-            >
-              <span>{Math.round(fuelShare)}% fuel</span>
-            </div>
-            <p className="esg-report__legend">Electricity share: {Math.round(100 - fuelShare)}%</p>
-          </div>
-          <div className="esg-report__chart">
-            <h3>Interpretation</h3>
-            <p>{interpretationText}</p>
-          </div>
-        </div>
-
-        <div className="esg-report__lower">
-          <div className="esg-report__scorecard">
-            <h3>ESG scorecard</h3>
-            <ul>
-              <li>
-                Environmental: {scores.environmentalScore}/8 ({scores.environmentalGrade})
-              </li>
-              <li>
-                Social: {scores.socialScore}/6 ({scores.socialGrade})
-              </li>
-              <li>
-                Governance: {scores.governanceScore}/6 ({scores.governanceGrade})
-              </li>
-            </ul>
-          </div>
-          <div className="esg-report__actions">
-            <h3>Targets & actions</h3>
-            <ul>
-              {actions.map((action) => (
-                <li key={action}>{action}</li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        <div className="esg-report__expandables">
-          <details>
-            <summary>Data inputs summary</summary>
-            <pre>{JSON.stringify(reportPayload, null, 2)}</pre>
-          </details>
-          <details>
-            <summary>Methodology & assumptions</summary>
-            <ul>
-              <li>Conservative emissions assumptions are applied for fuel and electricity.</li>
-              <li>Results are rounded to whole numbers.</li>
-              <li>This is a self-reported, non-audited ESG baseline.</li>
-            </ul>
-          </details>
-        </div>
-
-        <div className="esg-report__disclaimer">
-          <p>Self-reported data only. Not audited or certified.</p>
-          <p>
-            Version {reportVersion} · {reportDate}
-          </p>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       {activeModal === "signup" ? (
         <div className="esg-modal" role="dialog" aria-modal="true">
