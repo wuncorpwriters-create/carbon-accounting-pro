@@ -1,0 +1,21 @@
+{
+  "name": "carbon-accounting-pro",
+  "version": "1.0.0",
+  "description": "SME-friendly carbon accounting SaaS (Scope 1 &amp; 2)",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "tailwindcss": "^3.4.13",
+    "postcss": "^8.4.47",
+    "autoprefixer": "^10.4.20"
+  }
+}
