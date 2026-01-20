@@ -6,6 +6,9 @@ import MonthlyTrackerSummary from "./MonthlyTrackerSummary";
 import { calculateMonthlyEmissions } from "../../../lib/emissions/calculateMonthlyEmissions";
 
 const MonthlyCarbonTracker: React.FC = () => {
+  const now = new Date();
+  const defaultMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
   const steps: StepCardProps[] = [
     {
       title: "Electricity",
@@ -35,7 +38,7 @@ const MonthlyCarbonTracker: React.FC = () => {
 
   return (
     <section className="monthly-carbon-tracker" aria-labelledby="monthly-tracker-title">
-      <MonthlyTrackerHeader />
+      <MonthlyTrackerHeader selectedMonth={selectedMonth} onMonthChange={setSelectedMonth} />
 
       <section className="monthly-inputs" aria-label="Monthly emissions inputs">
         <div className="monthly-inputs__grid">
