@@ -3,6 +3,7 @@ import React from "react";
 import MonthlyTrackerHeader from "./MonthlyTrackerHeader";
 import MonthlyTrackerStepCard, { StepCardProps } from "./MonthlyTrackerStepCard";
 import MonthlyTrackerSummary from "./MonthlyTrackerSummary";
+import { calculateMonthlyEmissions } from "../../../lib/emissions/calculateMonthlyEmissions";
 
 const MonthlyCarbonTracker: React.FC = () => {
   const steps: StepCardProps[] = [
@@ -25,12 +26,19 @@ const MonthlyCarbonTracker: React.FC = () => {
       cta: "Start tracking",
     },
   ];
+  const emissions = calculateMonthlyEmissions({
+    electricityKwh: 1200,
+    fuelLiters: 150,
+    vehicleKm: 800,
+  });
 
   return (
     <section className="monthly-carbon-tracker" aria-labelledby="monthly-tracker-title">
       <MonthlyTrackerHeader />
 
-      <MonthlyTrackerSummary />
+      <MonthlyTrackerSummary
+        {...(emissions as React.ComponentProps<typeof MonthlyTrackerSummary>)}
+      />
 
       <section className="monthly-progress" aria-label="Progress indicator">
         <div className="monthly-progress__header">
