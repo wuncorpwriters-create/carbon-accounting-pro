@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 import MonthlyTrackerHeader from "./MonthlyTrackerHeader";
 import MonthlyTrackerStepCard, { StepCardProps } from "./MonthlyTrackerStepCard";
@@ -26,15 +26,60 @@ const MonthlyCarbonTracker: React.FC = () => {
       cta: "Start tracking",
     },
   ];
-  const emissions = calculateMonthlyEmissions({
+  const [inputs, setInputs] = useState({
     electricityKwh: 1200,
     fuelLiters: 150,
     vehicleKm: 800,
   });
+  const emissions = calculateMonthlyEmissions(inputs);
 
   return (
     <section className="monthly-carbon-tracker" aria-labelledby="monthly-tracker-title">
       <MonthlyTrackerHeader />
+
+      <section className="monthly-inputs" aria-label="Monthly emissions inputs">
+        <div className="monthly-inputs__grid">
+          <label className="monthly-inputs__field">
+            <span>Electricity (kWh)</span>
+            <input
+              type="number"
+              value={inputs.electricityKwh}
+              onChange={(event) =>
+                setInputs((prev) => ({
+                  ...prev,
+                  electricityKwh: Number(event.target.value),
+                }))
+              }
+            />
+          </label>
+          <label className="monthly-inputs__field">
+            <span>Fuel (liters)</span>
+            <input
+              type="number"
+              value={inputs.fuelLiters}
+              onChange={(event) =>
+                setInputs((prev) => ({
+                  ...prev,
+                  fuelLiters: Number(event.target.value),
+                }))
+              }
+            />
+          </label>
+          <label className="monthly-inputs__field">
+            <span>Vehicle travel (km)</span>
+            <input
+              type="number"
+              value={inputs.vehicleKm}
+              onChange={(event) =>
+                setInputs((prev) => ({
+                  ...prev,
+                  vehicleKm: Number(event.target.value),
+                }))
+              }
+            />
+          </label>
+        </div>
+      </section>
 
       <MonthlyTrackerSummary
         {...(emissions as React.ComponentProps<typeof MonthlyTrackerSummary>)}
