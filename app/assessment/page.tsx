@@ -10,7 +10,6 @@ export default function AssessmentPage() {
   const handleNext = () => {
     if (step === TOTAL_STEPS) {
       console.log("Assessment complete");
-      return;
     }
 
     setStep((prev) => Math.min(prev + 1, TOTAL_STEPS));
