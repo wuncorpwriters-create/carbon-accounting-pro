@@ -1,0 +1,5 @@
+node_modules
+.next
+.env.local
+*.zip
+carbon-accounting-pro@1.0.0
