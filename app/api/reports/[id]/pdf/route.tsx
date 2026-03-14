@@ -30,7 +30,7 @@ const PDF_CARBON_UNIT_SHORT = "CO2e";
 
 function formatPdfCarbonKg(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return "Not recorded";
-  return `${formatNumber(value, 1)} ${PDF_CARBON_UNIT}`;
+  return `${formatNumber(value, 0)} ${PDF_CARBON_UNIT}`;
 }
 
 function toTitleCase(value: string) {
@@ -103,18 +103,18 @@ const styles = StyleSheet.create({
     marginBottom: 1,
   },
   section: {
-    marginBottom: 9,
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 10.5,
     fontWeight: "bold",
-    marginBottom: 5,
+    marginBottom: 7,
     color: "#111827",
   },
   summaryGrid: {
     flexDirection: "row",
     gap: 8,
-    marginBottom: 9,
+    marginBottom: 12,
   },
   summaryCard: {
     flex: 1,
@@ -136,7 +136,7 @@ const styles = StyleSheet.create({
   twoColumn: {
     flexDirection: "row",
     gap: 8,
-    marginBottom: 9,
+    marginBottom: 12,
   },
   column: {
     flex: 1,
@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#f8fafc",
   },
   insightItem: {
-    marginBottom: 6,
+    marginBottom: 8,
   },
   insightHeading: {
     fontSize: 8.5,
@@ -193,7 +193,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     padding: 8,
     backgroundColor: "#f8fafc",
-    marginBottom: 6,
+    marginBottom: 8,
   },
   calloutTitle: {
     fontSize: 8.5,
@@ -202,11 +202,11 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   bulletList: {
-    marginTop: 2,
+    marginTop: 4,
   },
   bulletItem: {
     flexDirection: "row",
-    marginBottom: 4,
+    marginBottom: 6,
   },
   bulletDot: {
     width: 8,
@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     padding: 8,
     backgroundColor: "#eff6ff",
-    marginTop: 6,
+    marginTop: 8,
   },
   noteTitle: {
     fontSize: 8.5,
@@ -357,7 +357,7 @@ function ReportPDF({
                 <View style={styles.row}>
                   <Text style={styles.rowLabel}>Emissions per Employee</Text>
                   <Text style={styles.rowValue}>
-                    {formatNumber(intelligence.perEmployee)} {PDF_CARBON_UNIT}
+                    {formatNumber(intelligence.perEmployee, 1)} {PDF_CARBON_UNIT}
                   </Text>
                 </View>
               ) : null}
@@ -380,7 +380,7 @@ function ReportPDF({
                 <Text style={styles.rowValue}>
                   {report.electricity_factor == null
                     ? "Not recorded"
-                    : `${formatNumber(report.electricity_factor, 6)} ${PDF_CARBON_UNIT_SHORT} / kWh`}
+                    : `${formatNumber(report.electricity_factor, 4)} ${PDF_CARBON_UNIT_SHORT} / kWh`}
                 </Text>
               </View>
 
@@ -396,7 +396,7 @@ function ReportPDF({
                 <Text style={styles.rowValue}>
                   {report.fuel_factor == null
                     ? "Not recorded"
-                    : `${formatNumber(report.fuel_factor, 6)} ${PDF_CARBON_UNIT_SHORT} / liter`}
+                    : `${formatNumber(report.fuel_factor, 4)} ${PDF_CARBON_UNIT_SHORT} / liter`}
                 </Text>
               </View>
             </View>
