@@ -41,6 +41,50 @@ function getSignalToneClass(tone: SignalTone) {
   return "signal-chip signal-chip--neutral";
 }
 
+function toTitleCase(value: string) {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function formatCountryDisplay(country?: string | null) {
+  const raw = country?.trim();
+  if (!raw) return "Not recorded";
+
+  const normalized = raw.toLowerCase();
+
+  const countryMap: Record<string, string> = {
+    ke: "Kenya",
+    ug: "Uganda",
+    tz: "Tanzania",
+    rw: "Rwanda",
+    et: "Ethiopia",
+    ng: "Nigeria",
+    za: "South Africa",
+    gh: "Ghana",
+    uk: "United Kingdom",
+    gb: "United Kingdom",
+    us: "United States",
+    ae: "United Arab Emirates",
+  };
+
+  return countryMap[normalized] || toTitleCase(raw);
+}
+
+function formatIndustryDisplay(industry?: string | null) {
+  const raw = industry?.trim();
+  if (!raw) return "Not recorded";
+  return toTitleCase(raw);
+}
+
+function formatCompanyDisplay(company?: string | null) {
+  const raw = company?.trim();
+  if (!raw) return "Not recorded";
+  return toTitleCase(raw);
+}
+
 export default function ReportDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -325,21 +369,21 @@ export default function ReportDetailPage() {
             <div className="report-detail-row">
               <span className="report-detail-label">Company</span>
               <span className="report-detail-value">
-                {report.company_name?.trim() || "Not recorded"}
+                {formatCompanyDisplay(report.company_name)}
               </span>
             </div>
 
             <div className="report-detail-row">
               <span className="report-detail-label">Country</span>
               <span className="report-detail-value">
-                {report.country?.trim() || "Not recorded"}
+                {formatCountryDisplay(report.country)}
               </span>
             </div>
 
             <div className="report-detail-row">
               <span className="report-detail-label">Industry</span>
               <span className="report-detail-value">
-                {report.industry?.trim() || "Not recorded"}
+                {formatIndustryDisplay(report.industry)}
               </span>
             </div>
 
@@ -386,14 +430,14 @@ export default function ReportDetailPage() {
               <span className="report-detail-value">
                 {report.electricity_factor == null
                   ? "Not recorded"
-                  : `${formatNumber(report.electricity_factor, 6)} kg CO₂e / kWh`}
+                  : `${formatNumber(report.electricity_factor, 6)} kg CO2e / kWh`}
               </span>
             </div>
 
             <div className="report-detail-row">
               <span className="report-detail-label">Fuel Type</span>
               <span className="report-detail-value">
-                {report.fuel_type?.trim() || "Not recorded"}
+                {formatIndustryDisplay(report.fuel_type)}
               </span>
             </div>
 
@@ -402,7 +446,7 @@ export default function ReportDetailPage() {
               <span className="report-detail-value">
                 {report.fuel_factor == null
                   ? "Not recorded"
-                  : `${formatNumber(report.fuel_factor, 6)} kg CO₂e / liter`}
+                  : `${formatNumber(report.fuel_factor, 6)} kg CO2e / liter`}
               </span>
             </div>
 
@@ -528,7 +572,7 @@ export default function ReportDetailPage() {
                   ? "Benchmarking is limited until employee count is available."
                   : `This month recorded ${formatNumber(
                       intelligence.perEmployee
-                    )} kg CO₂e per employee.`}
+                    )} kg CO2e per employee.`}
               </p>
               <p>{formatKgFull(report.total_emissions)} total emissions recorded.</p>
             </div>
