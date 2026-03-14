@@ -213,7 +213,7 @@ export function getTrendDirection(
       tone: "neutral",
       summary: `Total emissions are broadly stable versus the previous month (${formatNumber(
         previousTotal
-      )} kg CO₂e).`,
+      )} kg CO2e).`,
       action:
         "Focus on steady efficiency gains and keep monitoring the dominant source.",
     };
@@ -225,7 +225,7 @@ export function getTrendDirection(
       tone: "positive",
       summary: `Total emissions fell by ${formatNumber(
         Math.abs(delta)
-      )} kg CO₂e${
+      )} kg CO2e${
         percentage != null ? ` (${formatNumber(Math.abs(percentage), 1)}%)` : ""
       } compared with the previous month.`,
       action:
@@ -236,7 +236,7 @@ export function getTrendDirection(
   return {
     label: "Worsening",
     tone: "negative",
-    summary: `Total emissions rose by ${formatNumber(delta)} kg CO₂e${
+    summary: `Total emissions rose by ${formatNumber(delta, 0)} kg CO2e${
       percentage != null ? ` (${formatNumber(percentage, 1)}%)` : ""
     } compared with the previous month.`,
     action:
@@ -353,7 +353,7 @@ export function getRecentBaselineComparison(
       tone: "neutral",
       summary: `Total emissions are broadly in line with your recent baseline of ${formatNumber(
         average
-      )} kg CO₂e across ${periodsUsed} prior period${
+      )} kg CO2e across ${periodsUsed} prior period${
         periodsUsed === 1 ? "" : "s"
       }.`,
       action:
@@ -371,7 +371,7 @@ export function getRecentBaselineComparison(
       tone: "positive",
       summary: `Total emissions are ${formatNumber(
         Math.abs(delta)
-      )} kg CO₂e below your recent baseline${
+      )} kg CO2e below your recent baseline${
         percentage != null ? ` (${formatNumber(Math.abs(percentage), 1)}%)` : ""
       }.`,
       action:
@@ -388,7 +388,7 @@ export function getRecentBaselineComparison(
     tone: "negative",
     summary: `Total emissions are ${formatNumber(
       delta
-    )} kg CO₂e above your recent baseline${
+    )} kg CO2e above your recent baseline${
       percentage != null ? ` (${formatNumber(percentage, 1)}%)` : ""
     }.`,
     action:
@@ -579,7 +579,7 @@ export function buildReportIntelligence(
   if (perEmployee != null && intensityBand) {
     benchmarkSummary = `${intensityBand.label} intensity: ${formatNumber(
       perEmployee
-    )} kg CO₂e per employee. ${intensityBand.action}`;
+    )} kg CO2e per employee. ${intensityBand.action}`;
   }
 
   return {

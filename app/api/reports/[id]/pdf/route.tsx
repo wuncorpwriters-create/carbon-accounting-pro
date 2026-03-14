@@ -387,7 +387,7 @@ function ReportPDF({
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Fuel Type</Text>
                 <Text style={styles.rowValue}>
-                  {report.fuel_type?.trim() || "Not recorded"}
+                  {formatIndustryDisplay(report.fuel_type)}
                 </Text>
               </View>
 
