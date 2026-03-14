@@ -10,10 +10,7 @@ import {
   pdf,
 } from "@react-pdf/renderer";
 import { createClient } from "@supabase/supabase-js";
-import {
-  formatNumber,
-  formatCarbonExactKg,
-} from "../../../../../lib/carbonFormat";
+import { formatNumber } from "../../../../../lib/carbonFormat";
 import {
   type ReportRow,
   formatDisplayDate,
@@ -27,6 +24,52 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
+
+const PDF_CARBON_UNIT = "kg CO2e";
+const PDF_CARBON_UNIT_SHORT = "CO2e";
+
+function formatPdfCarbonKg(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return "Not recorded";
+  return `${formatNumber(value, 1)} ${PDF_CARBON_UNIT}`;
+}
+
+function toTitleCase(value: string) {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(" ");
+}
+
+function formatCountryDisplay(country?: string | null) {
+  const raw = country?.trim();
+  if (!raw) return "Not recorded";
+
+  const normalized = raw.toLowerCase();
+
+  const countryMap: Record<string, string> = {
+    ke: "Kenya",
+    ug: "Uganda",
+    tz: "Tanzania",
+    rw: "Rwanda",
+    et: "Ethiopia",
+    ng: "Nigeria",
+    za: "South Africa",
+    gh: "Ghana",
+    uk: "United Kingdom",
+    gb: "United Kingdom",
+    us: "United States",
+    ae: "United Arab Emirates",
+  };
+
+  return countryMap[normalized] || toTitleCase(raw);
+}
+
+function formatIndustryDisplay(industry?: string | null) {
+  const raw = industry?.trim();
+  if (!raw) return "Not recorded";
+  return toTitleCase(raw);
+}
 
 const styles = StyleSheet.create({
   page: {
@@ -213,9 +256,9 @@ function ReportPDF({
   const reportingPeriod = formatPeriodLabel(report);
   const previousPeriodLabel = formatPeriodLabel(previousComparableReport);
 
-  const totalEmissions = formatCarbonExactKg(report.total_emissions);
-  const scope1 = formatCarbonExactKg(report.scope1_emissions);
-  const scope2 = formatCarbonExactKg(report.scope2_emissions);
+  const totalEmissions = formatPdfCarbonKg(report.total_emissions);
+  const scope1 = formatPdfCarbonKg(report.scope1_emissions);
+  const scope2 = formatPdfCarbonKg(report.scope2_emissions);
   const electricity = formatNumber(report.electricity_kwh);
   const fuel = formatNumber(report.fuel_liters);
   const employees =
@@ -274,14 +317,14 @@ function ReportPDF({
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Country</Text>
                 <Text style={styles.rowValue}>
-                  {report.country?.trim() || "Not recorded"}
+                  {formatCountryDisplay(report.country)}
                 </Text>
               </View>
 
               <View style={styles.row}>
                 <Text style={styles.rowLabel}>Industry</Text>
                 <Text style={styles.rowValue}>
-                  {report.industry?.trim() || "Not recorded"}
+                  {formatIndustryDisplay(report.industry)}
                 </Text>
               </View>
 
@@ -314,7 +357,7 @@ function ReportPDF({
                 <View style={styles.row}>
                   <Text style={styles.rowLabel}>Emissions per Employee</Text>
                   <Text style={styles.rowValue}>
-                    {formatNumber(intelligence.perEmployee)} kg CO₂e
+                    {formatNumber(intelligence.perEmployee)} {PDF_CARBON_UNIT}
                   </Text>
                 </View>
               ) : null}
@@ -337,7 +380,7 @@ function ReportPDF({
                 <Text style={styles.rowValue}>
                   {report.electricity_factor == null
                     ? "Not recorded"
-                    : `${formatNumber(report.electricity_factor, 6)} kg CO₂e / kWh`}
+                    : `${formatNumber(report.electricity_factor, 6)} ${PDF_CARBON_UNIT_SHORT} / kWh`}
                 </Text>
               </View>
 
@@ -353,7 +396,7 @@ function ReportPDF({
                 <Text style={styles.rowValue}>
                   {report.fuel_factor == null
                     ? "Not recorded"
-                    : `${formatNumber(report.fuel_factor, 6)} kg CO₂e / liter`}
+                    : `${formatNumber(report.fuel_factor, 6)} ${PDF_CARBON_UNIT_SHORT} / liter`}
                 </Text>
               </View>
             </View>
