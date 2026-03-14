@@ -8,6 +8,7 @@ import {
   formatNumber,
   formatCarbonExactKg,
 } from "../../../lib/carbonFormat";
+import { sortReportsChronologically } from "../../../lib/reportIntelligence";
 
 const supabase = createSupabaseClient();
 
@@ -209,7 +210,7 @@ export default function MonthlyTrackerPage() {
   }
 
   const chronologicalReports = useMemo(() => {
-    return [...reports].sort(compareChronologically);
+    return sortReportsChronologically(reports);
   }, [reports]);
 
   const availableYears = useMemo(() => {
