@@ -370,7 +370,8 @@ export function getRecentBaselineComparison(
       label: "Below baseline",
       tone: "positive",
       summary: `Total emissions are ${formatNumber(
-        Math.abs(delta)
+        Math.abs(delta),
+        0
       )} kg CO2e below your recent baseline${
         percentage != null ? ` (${formatNumber(Math.abs(percentage), 1)}%)` : ""
       }.`,
@@ -387,7 +388,8 @@ export function getRecentBaselineComparison(
     label: "Above baseline",
     tone: "negative",
     summary: `Total emissions are ${formatNumber(
-      delta
+      delta,
+      0
     )} kg CO2e above your recent baseline${
       percentage != null ? ` (${formatNumber(percentage, 1)}%)` : ""
     }.`,
@@ -578,7 +580,8 @@ export function buildReportIntelligence(
 
   if (perEmployee != null && intensityBand) {
     benchmarkSummary = `${intensityBand.label} intensity: ${formatNumber(
-      perEmployee
+      perEmployee,
+      1
     )} kg CO2e per employee. ${intensityBand.action}`;
   }
 

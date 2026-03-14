@@ -380,7 +380,7 @@ function ReportPDF({
                 <Text style={styles.rowValue}>
                   {report.electricity_factor == null
                     ? "Not recorded"
-                    : `${formatNumber(report.electricity_factor, 4)} ${PDF_CARBON_UNIT_SHORT} / kWh`}
+                    : `${formatNumber(report.electricity_factor, 4)} ${PDF_CARBON_UNIT} / kWh`}
                 </Text>
               </View>
 
@@ -396,7 +396,7 @@ function ReportPDF({
                 <Text style={styles.rowValue}>
                   {report.fuel_factor == null
                     ? "Not recorded"
-                    : `${formatNumber(report.fuel_factor, 4)} ${PDF_CARBON_UNIT_SHORT} / liter`}
+                    : `${formatNumber(report.fuel_factor, 4)} ${PDF_CARBON_UNIT} / liter`}
                 </Text>
               </View>
             </View>
