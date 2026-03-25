@@ -1120,6 +1120,26 @@ export default function ReportDetailPage() {
               <div className="performance-mini-panel performance-mini-panel--signal">
                 <div className="performance-mini-panel-head">
                   <span className="performance-mini-panel-title">
+                    Multi-month management read
+                  </span>
+                  <span className={getSignalToneClass(intelligence.multiMonthSignal.tone)}>
+                    {intelligence.multiMonthSignal.label}
+                  </span>
+                </div>
+                <p className="performance-mini-panel-summary">
+                  {intelligence.multiMonthSignal.summary}
+                </p>
+                <p className="performance-mini-panel-support">
+                  {intelligence.multiMonthSignal.action}
+                </p>
+                <p className="performance-mini-panel-support">
+                  <strong>Window:</strong> {intelligence.multiMonthSignal.windowLabel}
+                </p>
+              </div>
+
+              <div className="performance-mini-panel performance-mini-panel--signal">
+                <div className="performance-mini-panel-head">
+                  <span className="performance-mini-panel-title">
                     Benchmark Position
                   </span>
                   <span className={getSignalToneClass(intelligence.benchmarkPositionSignal.tone)}>

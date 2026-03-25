@@ -1123,6 +1123,20 @@ export default function MonthlyTrackerPage() {
               </div>
 
               <div className="insight-item">
+                <strong>Multi-month management read</strong>
+                <p>
+                  <span className={getSignalToneClass(trackerIntelligence.multiMonthSignal.tone)}>
+                    {trackerIntelligence.multiMonthSignal.label}
+                  </span>
+                </p>
+                <p>{trackerIntelligence.multiMonthSignal.summary}</p>
+                <p>{trackerIntelligence.multiMonthSignal.action}</p>
+                <p>
+                  <strong>Window:</strong> {trackerIntelligence.multiMonthSignal.windowLabel}
+                </p>
+              </div>
+
+              <div className="insight-item">
                 <strong>Change driver</strong>
                 <p>{trackerIntelligence.changeDriverSignal.summary}</p>
                 <p>{trackerIntelligence.changeDriverSignal.action}</p>
