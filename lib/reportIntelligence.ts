@@ -3698,6 +3698,24 @@ export type RecoveryProgressSignal = {
   gapChangeKg: number | null;
 };
 
+export type MultiMonthSignal = {
+  label: string;
+  tone: SignalTone;
+  summary: string;
+  action: string;
+  windowLabel: string;
+  improvingCount: number;
+  worseningCount: number;
+  stableCount: number;
+  averageDeltaPercent: number;
+  latestPosition:
+    | "below-range"
+    | "within-range"
+    | "above-range"
+    | "insufficient-history";
+};
+
+
 function getPercentChange(
   current: number | null | undefined,
   previous: number | null | undefined
@@ -4445,6 +4463,160 @@ function buildManagementActions(params: ManagementActionParams): ManagementActio
   };
 }
 
+
+function buildMultiMonthSignal(
+  report: ReportRow | null,
+  comparisonHistory: ReportRow[]
+): MultiMonthSignal {
+  if (!report) {
+    return {
+      label: "Limited history",
+      tone: "neutral",
+      summary:
+        "There is not enough comparable history yet to judge whether the recent multi-month pattern is improving, worsening, or mixed.",
+      action:
+        "Keep submitting monthly data so the platform can identify whether performance is stabilizing or drifting over time.",
+      windowLabel: "No comparable months",
+      improvingCount: 0,
+      worseningCount: 0,
+      stableCount: 0,
+      averageDeltaPercent: 0,
+      latestPosition: "insufficient-history",
+    };
+  }
+
+  const currentTotal = Number(report.total_emissions ?? 0);
+
+  const comparableHistory = getComparableHistory(report, comparisonHistory);
+
+  const validHistory = comparableHistory
+    .map((row) => Number(row.total_emissions ?? 0))
+    .filter((value) => Number.isFinite(value));
+
+  if (validHistory.length < 2) {
+    return {
+      label: "Limited history",
+      tone: "neutral",
+      summary:
+        "There is not enough comparable history yet to judge whether the recent multi-month pattern is improving, worsening, or mixed.",
+      action:
+        "Keep submitting monthly data so the platform can identify whether performance is stabilizing or drifting over time.",
+      windowLabel:
+        validHistory.length === 1 ? "1 comparable month" : "No comparable months",
+      improvingCount: 0,
+      worseningCount: 0,
+      stableCount: 0,
+      averageDeltaPercent: 0,
+      latestPosition: "insufficient-history",
+    };
+  }
+
+  const recentSeries = [...validHistory, currentTotal].slice(-6);
+
+  let improvingCount = 0;
+  let worseningCount = 0;
+  let stableCount = 0;
+  const pctChanges: number[] = [];
+
+  for (let index = 1; index < recentSeries.length; index += 1) {
+    const previous = recentSeries[index - 1];
+    const current = recentSeries[index];
+    const delta = current - previous;
+    const pct = previous > 0 ? (delta / previous) * 100 : 0;
+    pctChanges.push(pct);
+
+    const stabilityThreshold = Math.max(previous * 0.03, 5);
+
+    if (Math.abs(delta) <= stabilityThreshold) {
+      stableCount += 1;
+    } else if (delta < 0) {
+      improvingCount += 1;
+    } else {
+      worseningCount += 1;
+    }
+  }
+
+  const averageHistory =
+    validHistory.reduce((sum, value) => sum + value, 0) / validHistory.length;
+  const minimumHistory = Math.min(...validHistory);
+  const maximumHistory = Math.max(...validHistory);
+
+  let latestPosition: MultiMonthSignal["latestPosition"] = "within-range";
+  if (currentTotal < minimumHistory) latestPosition = "below-range";
+  if (currentTotal > maximumHistory) latestPosition = "above-range";
+
+  const averageDeltaPercent =
+    pctChanges.length > 0
+      ? pctChanges.reduce((sum, value) => sum + value, 0) / pctChanges.length
+      : 0;
+
+  let label = "Mixed recent pattern";
+  let tone: SignalTone = "neutral";
+  let summary =
+    "Recent months are moving in mixed directions, so management should focus on consistency rather than assuming a clear trend.";
+  let action =
+    "Review recent operating differences and standardize the practices behind the stronger months.";
+
+  if (improvingCount > worseningCount && improvingCount >= stableCount) {
+    label = "Improving recent pattern";
+    tone = "positive";
+    summary =
+      latestPosition === "below-range"
+        ? "Recent months are generally improving, and the latest month is now below the recent operating range."
+        : latestPosition === "within-range"
+          ? "Recent months are generally improving, with the latest month staying within the recent operating range."
+          : "Recent months are generally improving, although the latest month still sits above the recent operating range.";
+    action =
+      "Protect the operating changes behind the stronger months and make them the repeatable standard for the next cycle.";
+  } else if (worseningCount > improvingCount && worseningCount >= stableCount) {
+    label = "Worsening recent pattern";
+    tone = "negative";
+    summary =
+      latestPosition === "above-range"
+        ? "Recent months are generally worsening, and the latest month is now above the recent operating range."
+        : latestPosition === "within-range"
+          ? "Recent months are generally worsening even though the latest month remains within the recent operating range."
+          : "Recent months are generally worsening, though the latest month has not yet moved above the recent operating range.";
+    action =
+      "Investigate what changed across the last few months and target the source that is driving the repeated increases.";
+  } else if (stableCount > improvingCount && stableCount > worseningCount) {
+    label = "Stable recent pattern";
+    tone = "neutral";
+    summary =
+      "Recent months are relatively stable overall, so the management opportunity is to move from consistency into deliberate reduction.";
+    action =
+      "Use the stable baseline to choose one clear reduction lever and track whether the next month moves below the normal range.";
+  }
+
+  if (averageHistory <= 0) {
+    return {
+      label,
+      tone,
+      summary,
+      action,
+      windowLabel: `${validHistory.length} comparable months`,
+      improvingCount,
+      worseningCount,
+      stableCount,
+      averageDeltaPercent,
+      latestPosition,
+    };
+  }
+
+  return {
+    label,
+    tone,
+    summary,
+    action,
+    windowLabel: `${validHistory.length} comparable months`,
+    improvingCount,
+    worseningCount,
+    stableCount,
+    averageDeltaPercent,
+    latestPosition,
+  };
+}
+
 export function buildReportIntelligence(
   report: ReportRow | null,
   previousComparableReport: ReportRow | null,
@@ -4577,6 +4749,10 @@ export function buildReportIntelligence(
     previousComparableReport,
     bestMonthReference
   );
+  const multiMonthSignal = buildMultiMonthSignal(
+    report,
+    comparisonHistory
+  );
 
   const managementActions = report
     ? buildManagementActions({
@@ -4629,6 +4805,7 @@ export function buildReportIntelligence(
   return {
     perEmployee,
     bestMonthReference,
+    multiMonthSignal,
     recoveryProgressSignal,
     intensityBand,
     trend,
