@@ -1,7 +1,12 @@
 "use client";
 
+import { Suspense } from "react";
 import AssessmentClient from "./AssessmentClient";
 
 export default function AssessmentPage() {
-  return <AssessmentClient />;
+  return (
+    <Suspense fallback={null}>
+      <AssessmentClient />
+    </Suspense>
+  );
 }

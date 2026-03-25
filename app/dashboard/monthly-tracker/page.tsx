@@ -8,23 +8,14 @@ import {
   formatNumber,
   formatCarbonExactKg,
 } from "../../../lib/carbonFormat";
-import { sortReportsChronologically } from "../../../lib/reportIntelligence";
+import {
+  sortReportsChronologically,
+  buildReportIntelligence,
+  getComparisonSummary,
+  type ReportRow,
+} from "../../../lib/reportIntelligence";
 
 const supabase = createSupabaseClient();
-
-type ReportRow = {
-  id: string;
-  period_label?: string | null;
-  reporting_period?: string | null;
-  total_emissions?: number | null;
-  scope1_emissions?: number | null;
-  scope2_emissions?: number | null;
-  employee_count?: number | null;
-  electricity_kwh?: number | null;
-  fuel_liters?: number | null;
-  created_at?: string | null;
-};
-
 
 function formatKgValue(value: number | null | undefined) {
   return formatCarbonExactKg(value, 2);
@@ -59,46 +50,27 @@ function formatPeriodLabel(report: ReportRow) {
   return formatDisplayDate(report.created_at);
 }
 
-function parseReportingDateStrict(report: ReportRow): Date | null {
-  const raw = (report.period_label || report.reporting_period || "").trim();
-  if (!raw) return null;
+function getPeriodYear(report: ReportRow) {
+  const label = formatPeriodLabel(report);
 
-  const normalized = raw.replace(/\s+/g, " ").trim();
-
-  if (/^[A-Za-z]{3,9}\s+\d{4}$/i.test(normalized)) {
-    const parsed = new Date(`${normalized} 01`);
-    if (!Number.isNaN(parsed.getTime())) return parsed;
+  const monthYearMatch = label.match(/\b([A-Za-z]{3,9})\s+(\d{4})\b/);
+  if (monthYearMatch) {
+    return Number(monthYearMatch[2]);
   }
 
-  if (/^\d{4}-\d{2}$/.test(normalized)) {
-    const parsed = new Date(`${normalized}-01`);
-    if (!Number.isNaN(parsed.getTime())) return parsed;
+  const isoMonthMatch = label.match(/^(\d{4})-(\d{2})(?:-\d{2})?$/);
+  if (isoMonthMatch) {
+    return Number(isoMonthMatch[1]);
   }
-
-  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
-    const parsed = new Date(normalized);
-    if (!Number.isNaN(parsed.getTime())) return parsed;
-  }
-
-  return null;
-}
-
-function parseSortDate(report: ReportRow): Date | null {
-  const strict = parseReportingDateStrict(report);
-  if (strict) return strict;
 
   if (report.created_at) {
     const created = new Date(report.created_at);
-    if (!Number.isNaN(created.getTime())) return created;
+    if (!Number.isNaN(created.getTime())) {
+      return created.getFullYear();
+    }
   }
 
   return null;
-}
-
-function getPeriodYear(report: ReportRow) {
-  const parsed = parseReportingDateStrict(report);
-  if (!parsed) return null;
-  return parsed.getFullYear();
 }
 
 function getPerEmployee(
@@ -109,25 +81,10 @@ function getPerEmployee(
   return total / employees;
 }
 
-function compareChronologically(a: ReportRow, b: ReportRow) {
-  const dateA = parseSortDate(a);
-  const dateB = parseSortDate(b);
-
-  if (dateA && dateB) {
-    return dateA.getTime() - dateB.getTime();
-  }
-
-  if (dateA && !dateB) return -1;
-  if (!dateA && dateB) return 1;
-
-  const createdA = a.created_at ? new Date(a.created_at).getTime() : 0;
-  const createdB = b.created_at ? new Date(b.created_at).getTime() : 0;
-
-  if (createdA !== createdB) {
-    return createdA - createdB;
-  }
-
-  return a.id.localeCompare(b.id);
+function getSignalToneClass(tone: "positive" | "negative" | "neutral") {
+  if (tone === "positive") return "signal-chip signal-chip--positive";
+  if (tone === "negative") return "signal-chip signal-chip--negative";
+  return "signal-chip signal-chip--neutral";
 }
 
 export default function MonthlyTrackerPage() {
@@ -343,6 +300,29 @@ export default function MonthlyTrackerPage() {
     };
   }, [summary]);
 
+  const trackerComparisonHistory = useMemo(() => {
+    if (!summary.latest) return [];
+
+    return filteredReports
+      .filter(
+        (report) =>
+          report.id !== summary.latest?.id && report.total_emissions != null
+      )
+      .slice(-6);
+  }, [filteredReports, summary.latest]);
+
+  const trackerIntelligence = useMemo(() => {
+    return buildReportIntelligence(
+      summary.latest,
+      summary.previous,
+      trackerComparisonHistory
+    );
+  }, [summary.latest, summary.previous, trackerComparisonHistory]);
+
+  const trackerComparisonSummary = useMemo(() => {
+    return getComparisonSummary(summary.latest, summary.previous);
+  }, [summary.latest, summary.previous]);
+
   const rankedReports = useMemo(() => {
     return [...filteredReports]
       .filter((report) => report.total_emissions != null)
@@ -355,6 +335,73 @@ export default function MonthlyTrackerPage() {
 
   const recentReports = useMemo(() => {
     return [...filteredReports].reverse();
+  }, [filteredReports]);
+
+  const comparisonByReportId = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        delta: number | null;
+        percent: number | null;
+        tone: "positive" | "negative" | "neutral";
+        label: string;
+      }
+    >();
+
+    filteredReports.forEach((report, index) => {
+      const previous = index > 0 ? filteredReports[index - 1] : null;
+      const currentTotal = report.total_emissions ?? null;
+      const previousTotal = previous?.total_emissions ?? null;
+      const previousLabel = previous ? formatPeriodLabel(previous) : "previous month";
+
+      if (currentTotal == null || previousTotal == null) {
+        map.set(report.id, {
+          delta: null,
+          percent: null,
+          tone: "neutral",
+          label: "Need previous month",
+        });
+        return;
+      }
+
+      const delta = currentTotal - previousTotal;
+      const percent = previousTotal > 0 ? (delta / previousTotal) * 100 : null;
+
+      if (delta < 0) {
+        map.set(report.id, {
+          delta,
+          percent,
+          tone: "positive",
+          label:
+            percent == null
+              ? `Down vs ${previousLabel}`
+              : `Down vs ${previousLabel} · ${formatNumber(Math.abs(percent), 1)}%`,
+        });
+        return;
+      }
+
+      if (delta > 0) {
+        map.set(report.id, {
+          delta,
+          percent,
+          tone: "negative",
+          label:
+            percent == null
+              ? `Up vs ${previousLabel}`
+              : `Up vs ${previousLabel} · ${formatNumber(percent, 1)}%`,
+        });
+        return;
+      }
+
+      map.set(report.id, {
+        delta,
+        percent,
+        tone: "neutral",
+        label: `Flat vs ${previousLabel}`,
+      });
+    });
+
+    return map;
   }, [filteredReports]);
 
   return (
@@ -387,7 +434,10 @@ export default function MonthlyTrackerPage() {
           <Link href="/dashboard/assessment" className="workflow-strip-link">
             New Assessment
           </Link>
-          <Link href="/dashboard/monthly-tracker" className="workflow-strip-link workflow-strip-link--current">
+          <Link
+            href="/dashboard/monthly-tracker"
+            className="workflow-strip-link workflow-strip-link--current"
+          >
             Monthly Tracker
           </Link>
           <Link href="/dashboard/reports" className="workflow-strip-link">
@@ -407,23 +457,206 @@ export default function MonthlyTrackerPage() {
       ) : null}
 
       {!loading && reports.length === 0 ? (
-        <Card>
-          <div className="empty-state">
-            <p>No monthly reports available yet.</p>
-            <p>
-              Complete your first monthly assessment to start tracking emissions
-              over time, compare months, and identify your best and worst months.
-            </p>
-            <div className="page-actions" style={{ justifyContent: "center", marginTop: "12px" }}>
-              <Link href="/dashboard/assessment" className="button button-primary">
-                Start First Monthly Assessment
-              </Link>
-              <Link href="/dashboard/reports" className="button button-secondary">
-                View Reports
-              </Link>
+        <>
+          <section className="dashboard-onboarding-hero tracker-onboarding-hero">
+            <div className="dashboard-onboarding-copy">
+              <p className="dashboard-onboarding-eyebrow">Monthly tracker</p>
+              <h2>Track month-vs-month movement once you start building history.</h2>
+              <p className="dashboard-onboarding-lead">
+                The tracker becomes valuable after your first reporting months are
+                in place. It helps you review changes over time, spot your best
+                and worst months, and understand whether the latest month is
+                improving, worsening, or staying near baseline.
+              </p>
+
+              <div className="dashboard-onboarding-actions">
+                <Link href="/dashboard/assessment" className="button button-primary">
+                  Start First Monthly Assessment
+                </Link>
+                <Link href="/dashboard/reports" className="button button-secondary">
+                  See Where Reports Appear
+                </Link>
+              </div>
             </div>
+
+            <div className="dashboard-onboarding-checklist">
+              <div className="dashboard-onboarding-checklist-card">
+                <strong>What this page shows later</strong>
+                <ul className="recommendation-list recommendation-list--compact">
+                  <li>Months in view for a selected year or all years</li>
+                  <li>Best and worst reporting months</li>
+                  <li>Average emissions across the months in view</li>
+                  <li>Month-vs-month movement cues</li>
+                </ul>
+              </div>
+
+              <div className="dashboard-onboarding-checklist-card">
+                <strong>Why it matters</strong>
+                <ul className="recommendation-list recommendation-list--compact">
+                  <li>See whether the latest month is improving</li>
+                  <li>Build a simple operating baseline over time</li>
+                  <li>Review months in ranked and chronological order</li>
+                  <li>Strengthen your reporting rhythm month by month</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <div className="dashboard-grid dashboard-grid--kpis">
+            <Card>
+              <div className="kpi-card">
+                <p className="kpi-label">Months in View</p>
+                <div className="kpi-figure">
+                  <span className="kpi-number">—</span>
+                </div>
+                <p className="kpi-subtext">Populates after your first months are added</p>
+              </div>
+            </Card>
+
+            <Card>
+              <div className="kpi-card">
+                <p className="kpi-label">Average Emissions</p>
+                <div className="kpi-figure">
+                  <span className="kpi-number">—</span>
+                </div>
+                <p className="kpi-subtext">Average per selected month range</p>
+              </div>
+            </Card>
+
+            <Card>
+              <div className="kpi-card">
+                <p className="kpi-label">Best Month</p>
+                <div className="kpi-figure">
+                  <span className="kpi-number">—</span>
+                </div>
+                <p className="kpi-subtext">Lowest emissions month in view</p>
+              </div>
+            </Card>
+
+            <Card>
+              <div className="kpi-card">
+                <p className="kpi-label">Worst Month</p>
+                <div className="kpi-figure">
+                  <span className="kpi-number">—</span>
+                </div>
+                <p className="kpi-subtext">Highest emissions month in view</p>
+              </div>
+            </Card>
           </div>
-        </Card>
+
+          <div className="dashboard-grid dashboard-grid--main">
+            <Card>
+              <div className="section-header">
+                <div>
+                  <h3>How month-vs-month cues work</h3>
+                  <p className="chart-meta-label">
+                    The tracker becomes more useful after month two.
+                  </p>
+                </div>
+              </div>
+
+              <div className="insights-list">
+                <div className="insight-item">
+                  <strong>Down vs previous month</strong>
+                  <p>
+                    A lower latest month usually signals improvement relative to
+                    the prior reporting month.
+                  </p>
+                </div>
+
+                <div className="insight-item">
+                  <strong>Up vs previous month</strong>
+                  <p>
+                    A higher latest month can indicate increased activity,
+                    higher energy use, or a change in fuel usage.
+                  </p>
+                </div>
+
+                <div className="insight-item">
+                  <strong>Need previous month</strong>
+                  <p>
+                    The tracker needs at least two chronological months before
+                    direct month-vs-month cues can appear.
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            <Card>
+              <div className="section-header">
+                <div>
+                  <h3>What gets stronger over time</h3>
+                  <p className="chart-meta-label">
+                    Repeated monthly reporting creates baseline context.
+                  </p>
+                </div>
+              </div>
+
+              <div className="insights-list">
+                <div className="insight-item">
+                  <strong>Better ranked views</strong>
+                  <p>
+                    You can quickly see your lowest and highest emissions months
+                    instead of reviewing reports one by one.
+                  </p>
+                </div>
+
+                <div className="insight-item">
+                  <strong>Cleaner review rhythm</strong>
+                  <p>
+                    A monthly cadence makes it easier to detect operational
+                    changes earlier.
+                  </p>
+                </div>
+
+                <div className="insight-item">
+                  <strong>More reliable baseline context</strong>
+                  <p>
+                    As reporting history grows, the tracker becomes a stronger
+                    operational review tool instead of a one-off snapshot.
+                  </p>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          <Card>
+            <div className="section-header">
+              <div>
+                <h3>What you do here later</h3>
+                <p className="chart-meta-label">
+                  Use the tracker as your ongoing monthly review layer.
+                </p>
+              </div>
+            </div>
+
+            <div className="dashboard-onboarding-benefits">
+              <div className="dashboard-onboarding-benefit">
+                <strong>Review ranked months</strong>
+                <p>
+                  Open the lowest and highest months quickly to understand what
+                  changed.
+                </p>
+              </div>
+
+              <div className="dashboard-onboarding-benefit">
+                <strong>Monitor the latest month</strong>
+                <p>
+                  Check whether the newest reporting month improved or worsened
+                  against the one before it.
+                </p>
+              </div>
+
+              <div className="dashboard-onboarding-benefit">
+                <strong>Keep building history</strong>
+                <p>
+                  Every added month improves the quality of your tracker view
+                  and later reporting decisions.
+                </p>
+              </div>
+            </div>
+          </Card>
+        </>
       ) : null}
 
       {!loading && reports.length > 0 ? (
@@ -482,6 +715,15 @@ export default function MonthlyTrackerPage() {
                 <p>
                   This is the freshest reporting month in your tracker and is now
                   included in your comparisons and insights.
+                </p>
+                <p>
+                  <span className={getSignalToneClass(trackerIntelligence.managementSignal.tone)}>
+                    {trackerIntelligence.managementSignal.label}
+                  </span>
+                  {" · "}
+                  <span className={getSignalToneClass(trackerIntelligence.consistencySignal.tone)}>
+                    {trackerIntelligence.consistencySignal.label}
+                  </span>
                 </p>
               </div>
               <div className="latest-month-highlight-actions">
@@ -646,66 +888,303 @@ export default function MonthlyTrackerPage() {
                       : "0 kg CO₂e"}
                   </strong>
                 </div>
+                <div className="details-row">
+                  <span>Management read</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.managementSignal.tone)}>
+                      {trackerIntelligence.managementSignal.label}
+                    </span>
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Recent pattern</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.consistencySignal.tone)}>
+                      {trackerIntelligence.consistencySignal.label}
+                    </span>
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Normal vs unusual</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.anomalySignal.tone)}>
+                      {trackerIntelligence.anomalySignal.label}
+                    </span>
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Recent position</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.recentPositionSignal.tone)}>
+                      {trackerIntelligence.recentPositionSignal.label}
+                    </span>
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Performance streak</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.deteriorationStreakSignal.tone)}>
+                      {trackerIntelligence.deteriorationStreakSignal.label}
+                    </span>
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Persistent source pattern</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.persistentSourceSignal.tone)}>
+                      {trackerIntelligence.persistentSourceSignal.label}
+                    </span>
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Recent trajectory</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.recentTrajectorySignal.tone)}>
+                      {trackerIntelligence.recentTrajectorySignal.label}
+                    </span>
+                  </strong>
+                </div>
+
+                <div className="details-row">
+                  <span>Recovery progress</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.recoveryProgressSignal.tone)}>
+                      {trackerIntelligence.recoveryProgressSignal.label}
+                    </span>
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Change driver</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.changeDriverSignal.tone)}>
+                      {trackerIntelligence.changeDriverSignal.label}
+                    </span>
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Biggest opportunity</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.opportunitySignal.tone)}>
+                      {trackerIntelligence.opportunitySignal.label}
+                    </span>
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Best recent month</span>
+                  <strong>
+                    {trackerIntelligence.benchmarkDepthSignal.bestPeriodLabel || "—"}
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Gap to best recent month</span>
+                  <strong>
+                    {trackerIntelligence.benchmarkDepthSignal.gapToBest == null
+                      ? "—"
+                      : trackerIntelligence.benchmarkDepthSignal.gapToBest > 0
+                      ? `+${formatNumber(trackerIntelligence.benchmarkDepthSignal.gapToBest, 2)} kg CO₂e`
+                      : trackerIntelligence.benchmarkDepthSignal.gapToBest < 0
+                      ? `-${formatNumber(Math.abs(trackerIntelligence.benchmarkDepthSignal.gapToBest), 2)} kg CO₂e`
+                      : "0 kg CO₂e"}
+                  </strong>
+                </div>
+                <div className="details-row">
+                  <span>Benchmark position</span>
+                  <strong>
+                    <span className={getSignalToneClass(trackerIntelligence.benchmarkPositionSignal.tone)}>
+                      {trackerIntelligence.benchmarkPositionSignal.label}
+                    </span>
+                  </strong>
+                </div>
               </div>
             </Card>
 
             <Card>
-              <div className="section-header">
-                <h3>Tracker Insights</h3>
+            <div className="section-header">
+              <h3>Tracker Insights</h3>
+            </div>
+
+            <div className="summary-callout" style={{ marginBottom: "16px" }}>
+              <strong>Executive summary</strong>
+              <p>{trackerIntelligence.executiveSummary}</p>
+            </div>
+
+            <div className="summary-callout" style={{ marginBottom: "16px" }}>
+              <strong>Priority Actions</strong>
+
+              {trackerIntelligence.priorityActions?.length ? (
+                trackerIntelligence.priorityActions.map((action, index) => (
+                  <div
+                    key={`${action.title}-${index}`}
+                    className="insight-item"
+                    style={index === trackerIntelligence.priorityActions.length - 1 ? { paddingBottom: 0 } : undefined}
+                  >
+                    <strong>{action.title}</strong>
+                    <p>{action.summary}</p>
+                  </div>
+                ))
+              ) : (
+                <p>No priority actions yet.</p>
+              )}
+
+              {trackerIntelligence.biggestOpportunity ? (
+                <p>
+                  <strong>Biggest opportunity:</strong> {trackerIntelligence.biggestOpportunity}
+                </p>
+              ) : null}
+
+              {trackerIntelligence.nextBestStep ? (
+                <p>
+                  <strong>Next best step:</strong> {trackerIntelligence.nextBestStep}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="details-list" style={{ marginBottom: "16px" }}>
+              <div className="details-row">
+                <span>Management read</span>
+                <strong>
+                  <span className={getSignalToneClass(trackerIntelligence.managementSignal.tone)}>
+                    {trackerIntelligence.managementSignal.label}
+                  </span>
+                </strong>
               </div>
 
-              <div className="insights-list">
-                <div className="insight-item">
-                  <strong>Best month</strong>
-                  <p>
-                    {summary.best
-                      ? `${formatPeriodLabel(summary.best)} has the lowest recorded total at ${formatKgValue(
-                          summary.best.total_emissions
-                        )}.`
-                      : "Not enough history yet to identify the best month."}
-                  </p>
-                </div>
-
-                <div className="insight-item">
-                  <strong>Worst month</strong>
-                  <p>
-                    {summary.worst
-                      ? `${formatPeriodLabel(summary.worst)} has the highest recorded total at ${formatKgValue(
-                          summary.worst.total_emissions
-                        )}.`
-                      : "Not enough history yet to identify the worst month."}
-                  </p>
-                </div>
-
-                <div className="insight-item">
-                  <strong>Average baseline</strong>
-                  <p>
-                    {summary.average == null
-                      ? "There is not enough data to calculate an average baseline."
-                      : `Average emissions for the current view are ${formatKgValue(
-                          summary.average
-                        )} per reporting month.`}
-                  </p>
-                </div>
-
-                <div className="insight-item">
-                  <strong>Latest movement</strong>
-                  <p>
-                    {periodComparison.delta == null
-                      ? "Add at least two months in the selected view to compare movement."
-                      : periodComparison.delta < 0
-                      ? `The latest month improved by ${formatKgValue(
-                          Math.abs(periodComparison.delta)
-                        )} compared with the previous one.`
-                      : periodComparison.delta > 0
-                      ? `The latest month increased by ${formatKgValue(
-                          periodComparison.delta
-                        )} compared with the previous one.`
-                      : "The latest month is unchanged compared with the previous one."}
-                  </p>
-                </div>
+              <div className="details-row">
+                <span>Recent pattern</span>
+                <strong>
+                  <span className={getSignalToneClass(trackerIntelligence.consistencySignal.tone)}>
+                    {trackerIntelligence.consistencySignal.label}
+                  </span>
+                </strong>
               </div>
-            </Card>
+
+              <div className="details-row">
+                <span>Normal vs unusual</span>
+                <strong>
+                  <span className={getSignalToneClass(trackerIntelligence.anomalySignal.tone)}>
+                    {trackerIntelligence.anomalySignal.label}
+                  </span>
+                </strong>
+              </div>
+            </div>
+
+            <div className="insights-list">
+              <div className="insight-item">
+                <strong>Management context</strong>
+                <p>{trackerIntelligence.managementSignal.summary}</p>
+                <p>{trackerIntelligence.managementSignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Main watchout</strong>
+                <p>{trackerIntelligence.sourceWatchout.summary}</p>
+                <p>{trackerIntelligence.sourceWatchout.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Comparison summary</strong>
+                <p>
+                  {trackerComparisonSummary?.summary ||
+                    "Add at least two chronological months in the current view to unlock a stronger comparison summary."}
+                </p>
+                {trackerComparisonSummary?.action ? (
+                  <p>{trackerComparisonSummary.action}</p>
+                ) : null}
+              </div>
+
+              <div className="insight-item">
+                <strong>Recent position</strong>
+                <p>{trackerIntelligence.recentPositionSignal.summary}</p>
+                <p>{trackerIntelligence.recentPositionSignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Performance streak</strong>
+                <p>{trackerIntelligence.deteriorationStreakSignal.summary}</p>
+                <p>{trackerIntelligence.deteriorationStreakSignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Persistent source pattern</strong>
+                <p>{trackerIntelligence.persistentSourceSignal.summary}</p>
+                <p>{trackerIntelligence.persistentSourceSignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Recent trajectory</strong>
+                <p>{trackerIntelligence.recentTrajectorySignal.summary}</p>
+                <p>{trackerIntelligence.recentTrajectorySignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Recovery Progress</strong>
+                <p>{trackerIntelligence.recoveryProgressSignal.summary}</p>
+                <p>{trackerIntelligence.recoveryProgressSignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Change driver</strong>
+                <p>{trackerIntelligence.changeDriverSignal.summary}</p>
+                <p>{trackerIntelligence.changeDriverSignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Biggest opportunity</strong>
+                <p>{trackerIntelligence.opportunitySignal.summary}</p>
+                <p>{trackerIntelligence.opportunitySignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>{trackerIntelligence.benchmarkDepthSignal.title}</strong>
+                <p>{trackerIntelligence.benchmarkDepthSignal.summary}</p>
+                <p>{trackerIntelligence.benchmarkDepthSignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Benchmark Position</strong>
+                <p>{trackerIntelligence.benchmarkPositionSignal.summary}</p>
+                <p>
+                  <strong>Rank in history:</strong>{" "}
+                  {trackerIntelligence.benchmarkPositionSignal.rank != null
+                    ? `${trackerIntelligence.benchmarkPositionSignal.rank} of ${trackerIntelligence.benchmarkPositionSignal.totalCount}`
+                    : "Not enough data"}
+                </p>
+                <p>
+                  <strong>Gap to best:</strong>{" "}
+                  {trackerIntelligence.benchmarkPositionSignal.deltaToBest != null
+                    ? formatKgValue(trackerIntelligence.benchmarkPositionSignal.deltaToBest)
+                    : "Not enough data"}
+                </p>
+                <p>
+                  <strong>Gap to average:</strong>{" "}
+                  {trackerIntelligence.benchmarkPositionSignal.deltaToAverage != null
+                    ? formatKgValue(trackerIntelligence.benchmarkPositionSignal.deltaToAverage)
+                    : "Not enough data"}
+                </p>
+                <p>{trackerIntelligence.benchmarkPositionSignal.action}</p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Vs Best Month</strong>
+                <p>{trackerIntelligence.bestMonthReference.summary}</p>
+                <p>
+                  <strong>Best recent month:</strong>{" "}
+                  {trackerIntelligence.bestMonthReference.bestMonthLabel}
+                </p>
+                <p>
+                  <strong>Gap vs best:</strong>{" "}
+                  {trackerIntelligence.bestMonthReference.gapKg != null
+                    ? formatKgValue(trackerIntelligence.bestMonthReference.gapKg)
+                    : "Not enough data"}
+                </p>
+                <p>
+                  <strong>Driver:</strong>{" "}
+                  {trackerIntelligence.bestMonthReference.driverSignal.label}
+                </p>
+                <p>{trackerIntelligence.bestMonthReference.nextStep}</p>
+              </div>
+            </div>
+          </Card>
           </div>
 
           <Card>
@@ -772,6 +1251,7 @@ export default function MonthlyTrackerPage() {
 
               {recentReports.map((report) => {
                 const isLatestMonth = summary.latest?.id === report.id;
+                const comparisonCue = comparisonByReportId.get(report.id);
 
                 return (
                   <div
@@ -784,6 +1264,14 @@ export default function MonthlyTrackerPage() {
                       <span>{formatPeriodLabel(report)}</span>
                       {isLatestMonth ? (
                         <span className="tracker-latest-badge">Latest</span>
+                      ) : null}
+                      {comparisonCue ? (
+                        <span
+                          className={getSignalToneClass(comparisonCue.tone)}
+                          style={{ marginTop: "8px", width: "fit-content" }}
+                        >
+                          {comparisonCue.label}
+                        </span>
                       ) : null}
                     </span>
                     <span>{formatKgValue(report.total_emissions)}</span>
@@ -821,4 +1309,4 @@ export default function MonthlyTrackerPage() {
       ) : null}
     </main>
   );
-} 
+}

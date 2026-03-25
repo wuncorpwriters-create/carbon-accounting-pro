@@ -19,6 +19,43 @@ function formatKg(value: number | null | undefined) {
   return formatCarbonExactKg(value);
 }
 
+function toTitleCase(value: string) {
+  return value
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatCountryDisplay(country?: string | null) {
+  const raw = country?.trim();
+  if (!raw) return "Not recorded";
+
+  const normalized = raw.toLowerCase();
+  const countryMap: Record<string, string> = {
+    usa: "USA",
+    us: "US",
+    uk: "UK",
+    uae: "UAE",
+    drc: "DRC",
+  };
+
+  return countryMap[normalized] || toTitleCase(raw);
+}
+
+function formatIndustryDisplay(industry?: string | null) {
+  const raw = industry?.trim();
+  if (!raw) return "Not recorded";
+  return toTitleCase(raw);
+}
+
+function formatCompanyDisplay(company?: string | null) {
+  const raw = company?.trim();
+  if (!raw) return "Not recorded";
+  return toTitleCase(raw);
+}
+
 function getSelectedYearLabel(selectedYear: string) {
   return selectedYear === "all" ? "All years" : selectedYear;
 }
@@ -27,6 +64,12 @@ function getPeriodYear(report: ReportRow) {
   const parsed = parseReportingDateStrict(report);
   if (!parsed) return null;
   return parsed.getFullYear();
+}
+
+function getSignalToneClass(tone: "positive" | "negative" | "neutral") {
+  if (tone === "positive") return "signal-chip signal-chip--positive";
+  if (tone === "negative") return "signal-chip signal-chip--negative";
+  return "signal-chip signal-chip--neutral";
 }
 
 export default function ReportsPage() {
@@ -201,6 +244,64 @@ export default function ReportsPage() {
     };
   }, [filteredReports]);
 
+  const comparisonByReportId = useMemo(() => {
+    const chronological = [...filteredReports].reverse();
+    const map = new Map<
+      string,
+      {
+        label: string;
+        tone: "positive" | "negative" | "neutral";
+      }
+    >();
+
+    chronological.forEach((report, index) => {
+      const previous = index > 0 ? chronological[index - 1] : null;
+      const currentTotal = report.total_emissions ?? null;
+      const previousTotal = previous?.total_emissions ?? null;
+      const previousLabel = previous ? formatPeriodLabel(previous) : "previous month";
+
+      if (currentTotal == null || previousTotal == null) {
+        map.set(report.id, {
+          label: "Need previous month",
+          tone: "neutral",
+        });
+        return;
+      }
+
+      const delta = currentTotal - previousTotal;
+      const percent = previousTotal > 0 ? (delta / previousTotal) * 100 : null;
+
+      if (delta < 0) {
+        map.set(report.id, {
+          label:
+            percent == null
+              ? `Down vs ${previousLabel}`
+              : `Down vs ${previousLabel} · ${Math.abs(percent).toFixed(1)}%`,
+          tone: "positive",
+        });
+        return;
+      }
+
+      if (delta > 0) {
+        map.set(report.id, {
+          label:
+            percent == null
+              ? `Up vs ${previousLabel}`
+              : `Up vs ${previousLabel} · ${percent.toFixed(1)}%`,
+          tone: "negative",
+        });
+        return;
+      }
+
+      map.set(report.id, {
+        label: `Flat vs ${previousLabel}`,
+        tone: "neutral",
+      });
+    });
+
+    return map;
+  }, [filteredReports]);
+
   async function confirmDelete() {
     if (!reportToDelete) return;
 
@@ -323,18 +424,177 @@ export default function ReportsPage() {
       )}
 
       {!loading && reports.length === 0 && (
-        <Card title="No Reports">
-          <p className="dashboard-insight-text">
-            No reports yet. Complete an assessment to generate your first
-            report.
-          </p>
+        <>
+          <section className="dashboard-onboarding-hero reports-onboarding-hero">
+            <div className="dashboard-onboarding-copy">
+              <p className="dashboard-onboarding-eyebrow">Reports</p>
+              <h2>Your first assessment creates your first carbon report.</h2>
+              <p className="dashboard-onboarding-lead">
+                This page becomes your report library. Each completed assessment
+                creates a detailed report you can open, review, and export as a
+                PDF for internal tracking or stakeholder sharing.
+              </p>
 
-          <div className="dashboard-actions reports-actions-spacer">
-            <Link href="/dashboard/assessment" className="dashboard-btn-primary">
-              Start New Assessment
-            </Link>
+              <div className="dashboard-onboarding-actions">
+                <Link
+                  href="/dashboard/assessment"
+                  className="dashboard-btn-primary"
+                >
+                  Start New Assessment
+                </Link>
+                <Link
+                  href="/dashboard"
+                  className="dashboard-btn-secondary"
+                >
+                  Back to Dashboard
+                </Link>
+              </div>
+            </div>
+
+            <div className="dashboard-onboarding-checklist">
+              <div className="dashboard-onboarding-checklist-card">
+                <strong>What appears here</strong>
+                <ul className="recommendation-list recommendation-list--compact">
+                  <li>One card per completed reporting month</li>
+                  <li>Quick access to report detail pages</li>
+                  <li>PDF download for each report</li>
+                  <li>Year filtering once you build history</li>
+                </ul>
+              </div>
+
+              <div className="dashboard-onboarding-checklist-card">
+                <strong>Why it matters</strong>
+                <ul className="recommendation-list recommendation-list--compact">
+                  <li>Keep a clean archive of monthly reports</li>
+                  <li>Review performance summaries over time</li>
+                  <li>Spot better and worse reporting months</li>
+                  <li>Support future ESG reporting workflows</li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <div className="dashboard-grid dashboard-grid--main">
+            <Card>
+              <div className="section-header">
+                <div>
+                  <h3>What your first report includes</h3>
+                  <p className="chart-meta-label">
+                    The first completed assessment already produces a usable report.
+                  </p>
+                </div>
+              </div>
+
+              <div className="insights-list">
+                <div className="insight-item">
+                  <strong>Emissions summary</strong>
+                  <p>
+                    Total emissions, Scope 1, Scope 2, and input details from
+                    your selected reporting month.
+                  </p>
+                </div>
+
+                <div className="insight-item">
+                  <strong>Methodology basis</strong>
+                  <p>
+                    Electricity and fuel assumptions are shown so the report can
+                    be interpreted consistently.
+                  </p>
+                </div>
+
+                <div className="insight-item">
+                  <strong>Performance summary</strong>
+                  <p>
+                    Benchmarking, dominant source, and baseline-oriented
+                    commentary become visible in the report layout.
+                  </p>
+                </div>
+
+                <div className="insight-item">
+                  <strong>Recommended actions</strong>
+                  <p>
+                    The report surfaces next steps based on the emissions mix
+                    and current reporting context.
+                  </p>
+                </div>
+              </div>
+            </Card>
+
+            <Card>
+              <div className="section-header">
+                <div>
+                  <h3>What improves after more months</h3>
+                  <p className="chart-meta-label">
+                    Repeated reporting makes this page more useful.
+                  </p>
+                </div>
+              </div>
+
+              <div className="insights-list">
+                <div className="insight-item">
+                  <strong>Comparison cues</strong>
+                  <p>
+                    Report cards begin showing whether a month is up, down, or
+                    flat against the previous reporting month.
+                  </p>
+                </div>
+
+                <div className="insight-item">
+                  <strong>Year filtering</strong>
+                  <p>
+                    Once you build history, you can focus on one reporting year
+                    or review all years together.
+                  </p>
+                </div>
+
+                <div className="insight-item">
+                  <strong>Better archive value</strong>
+                  <p>
+                    A growing report library makes it easier to revisit past
+                    months and support ongoing reporting discipline.
+                  </p>
+                </div>
+              </div>
+            </Card>
           </div>
-        </Card>
+
+          <Card>
+            <div className="section-header">
+              <div>
+                <h3>How to get value from this page</h3>
+                <p className="chart-meta-label">
+                  Use reports as your monthly reporting record.
+                </p>
+              </div>
+            </div>
+
+            <div className="dashboard-onboarding-benefits">
+              <div className="dashboard-onboarding-benefit">
+                <strong>Open report detail</strong>
+                <p>
+                  Review the full breakdown for a single month, including
+                  summary commentary and recommendations.
+                </p>
+              </div>
+
+              <div className="dashboard-onboarding-benefit">
+                <strong>Download PDF</strong>
+                <p>
+                  Export a cleaner report format for sharing, archiving, or
+                  internal documentation.
+                </p>
+              </div>
+
+              <div className="dashboard-onboarding-benefit">
+                <strong>Build month by month</strong>
+                <p>
+                  Each new assessment strengthens the value of your report
+                  library and later comparisons.
+                </p>
+              </div>
+            </div>
+          </Card>
+        </>
       )}
 
       {!loading && reports.length > 0 && filteredReports.length === 0 && (
@@ -411,6 +671,7 @@ export default function ReportsPage() {
               const createdDate = formatDisplayDate(report.created_at);
               const isDeleting = deletingId === report.id;
               const isLatestReport = index === 0;
+              const comparisonCue = comparisonByReportId.get(report.id);
 
               return (
                 <div
@@ -422,10 +683,17 @@ export default function ReportsPage() {
                   ) : null}
                   <Card title={period}>
                     <div className="report-row-meta">
-                      <p className="dashboard-insight-text">
-                        Total Emissions:{" "}
-                        <strong>{formatKg(report.total_emissions)}</strong>
-                      </p>
+                      <div className="report-total-block">
+                        <p className="dashboard-insight-text">
+                          Total Emissions:{" "}
+                          <strong>{formatKg(report.total_emissions)}</strong>
+                        </p>
+                        {comparisonCue ? (
+                          <span className={getSignalToneClass(comparisonCue.tone)}>
+                            {comparisonCue.label}
+                          </span>
+                        ) : null}
+                      </div>
 
                       <p className="dashboard-insight-text">
                         Created: {createdDate}
@@ -434,15 +702,15 @@ export default function ReportsPage() {
                       <p className="dashboard-insight-text">
                         Company:{" "}
                         <strong>
-                          {report.company_name?.trim() || "Not recorded"}
+                          {formatCompanyDisplay(report.company_name)}
                         </strong>
                       </p>
 
                       <p className="dashboard-insight-text">
                         Country / Industry:{" "}
                         <strong>
-                          {report.country?.trim() || "Not recorded"} /{" "}
-                          {report.industry?.trim() || "Not recorded"}
+                          {formatCountryDisplay(report.country)} /{" "}
+                          {formatIndustryDisplay(report.industry)}
                         </strong>
                       </p>
 
@@ -450,7 +718,7 @@ export default function ReportsPage() {
                         Method / Fuel:{" "}
                         <strong>
                           {getElectricityMethodLabel(report.electricity_method)}{" "}
-                          / {report.fuel_type?.trim() || "Not recorded"}
+                          / {formatIndustryDisplay(report.fuel_type)}
                         </strong>
                       </p>
                     </div>
@@ -461,6 +729,12 @@ export default function ReportsPage() {
                         className="dashboard-btn-secondary report-card-action"
                       >
                         View Report
+                      </Link>
+                      <Link
+                        href={`/dashboard/assessment?edit=${report.id}`}
+                        className="dashboard-btn-secondary report-card-action"
+                      >
+                        Edit
                       </Link>
 
                       <a

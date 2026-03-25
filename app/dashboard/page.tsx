@@ -4,10 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createSupabaseClient } from "../../lib/supabaseClient";
 import Card from "../../components/Card";
-import {
-  formatNumber,
-  formatCarbonExactKg,
-} from "../../lib/carbonFormat";
+import { formatNumber, formatCarbonExactKg } from "../../lib/carbonFormat";
 import {
   type ReportRow,
   type IntensityTone,
@@ -16,7 +13,10 @@ import {
   getIntensityBand,
   parseSortDate,
   compareReportsChronologically,
+  getChronologicalNeighbors,
   buildReportIntelligence,
+  buildComparisonMetrics,
+  getComparisonSummary,
 } from "../../lib/reportIntelligence";
 
 const supabase = createSupabaseClient();
@@ -56,6 +56,62 @@ function getSignalToneClass(tone: SignalTone) {
   if (tone === "positive") return "signal-chip signal-chip--positive";
   if (tone === "negative") return "signal-chip signal-chip--negative";
   return "signal-chip signal-chip--neutral";
+}
+
+function formatDashboardDelta(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) return "—";
+  const abs = Math.abs(value);
+  const prefix = value > 0 ? "+" : value < 0 ? "-" : "";
+  return `${prefix}${formatNumber(abs, 0)}`;
+}
+
+function tightenDashboardBaselineSummary(summary: string) {
+  return summary
+    .replace(/^Total emissions are /, "")
+    .replace(/ your recent operating baseline/, " recent baseline")
+    .replace(/ your early operating baseline/, " early baseline")
+    .replace(/ your single-period baseline/, " single-period baseline");
+}
+
+function tightenDashboardAction(action: string) {
+  return action
+    .replace(
+      "First priority: target fuel-saving actions, since direct fuel use is currently the biggest emissions driver.",
+      "Prioritize fuel-saving actions first, as Scope 1 is the main driver."
+    )
+    .replace(
+      "First priority: target electricity-saving actions, since purchased power is currently the biggest emissions driver.",
+      "Prioritize electricity-saving actions first, as Scope 2 is the main driver."
+    )
+    .replace(
+      "First priority: review fuel and electricity controls together, since neither source clearly dominates this month.",
+      "Review fuel and electricity controls together, as no single source dominates."
+    )
+    .replace(
+      "First priority: build a cleaner monthly baseline by keeping reporting periods, electricity inputs, fuel inputs, and period labels consistent every month.",
+      "Build a cleaner monthly baseline by keeping inputs and period labels consistent."
+    )
+    .replace(/^First priority:\s*/i, "")
+    .replace(/^Second priority:\s*/i, "")
+    .replace(/^Third priority:\s*/i, "");
+}
+
+function tightenDashboardAnomalySummary(summary: string) {
+  return summary
+    .replace(/^Total emissions are /, "")
+    .replace(/^There is not enough comparable reporting history yet to /, "")
+    .replace(/ with high confidence\./, ".")
+    .replace(/ with moderate confidence\./, ".")
+    .replace(/ but history is still limited\./, ".");
+}
+
+function tightenDashboardWatchout(summary: string) {
+  return summary
+    .replace(/^Most of the deterioration versus the previous comparable month appears to come from /, "")
+    .replace(/^Most of the reduction versus the previous comparable month appears to come from /, "")
+    .replace(/^The emissions mix shifted materially toward /, "Mix shifted toward ")
+    .replace(/^Total emissions increased, but emissions per employee improved\./, "Higher total, better intensity.")
+    .replace(/^Total emissions fell, but emissions per employee worsened\./, "Lower total, weaker intensity.");
 }
 
 function getBasePeriodLabel(report: ReportRow) {
@@ -114,71 +170,6 @@ function buildChartPath(points: { x: number; y: number }[]) {
     .join(" ");
 }
 
-function getDeltaTone(delta: number | null): SignalTone {
-  if (delta == null || Number.isNaN(delta)) return "neutral";
-  if (delta < 0) return "positive";
-  if (delta > 0) return "negative";
-  return "neutral";
-}
-
-function getMonthComparisonSummary(
-  latest: ReportRow | null,
-  previous: ReportRow | null
-) {
-  const latestTotal = latest?.total_emissions ?? null;
-  const previousTotal = previous?.total_emissions ?? null;
-  const latestLabel =
-    latest?.period_label || latest?.reporting_period || "latest month";
-  const previousLabel =
-    previous?.period_label || previous?.reporting_period || "previous month";
-
-  if (latestTotal == null || previousTotal == null) {
-    return {
-      absoluteDelta: null as number | null,
-      percentDelta: null as number | null,
-      tone: "neutral" as SignalTone,
-      label: "No comparison yet",
-      summary:
-        "Add at least two completed reporting months to compare month-over-month performance.",
-    };
-  }
-
-  const absoluteDelta = latestTotal - previousTotal;
-  const percentDelta =
-    previousTotal > 0 ? (absoluteDelta / previousTotal) * 100 : null;
-  const tone = getDeltaTone(absoluteDelta);
-
-  let label = `No change vs ${previousLabel}`;
-  if (absoluteDelta < 0) label = `Down vs ${previousLabel}`;
-  if (absoluteDelta > 0) label = `Up vs ${previousLabel}`;
-
-  let summary = `${latestLabel} is ${formatKgFull(
-    latestTotal
-  )} compared with ${formatKgFull(previousTotal)} in ${previousLabel}.`;
-
-  if (absoluteDelta < 0) {
-    summary = `${latestLabel} is lower than ${previousLabel} by ${formatKgValue(
-      Math.abs(absoluteDelta)
-    )} kg CO₂e${
-      percentDelta != null ? ` (${formatNumber(Math.abs(percentDelta), 1)}%)` : ""
-    }.`;
-  } else if (absoluteDelta > 0) {
-    summary = `${latestLabel} is higher than ${previousLabel} by ${formatKgValue(
-      absoluteDelta
-    )} kg CO₂e${
-      percentDelta != null ? ` (${formatNumber(percentDelta, 1)}%)` : ""
-    }.`;
-  }
-
-  return {
-    absoluteDelta,
-    percentDelta,
-    tone,
-    label,
-    summary,
-  };
-}
-
 export default function DashboardPage() {
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -202,7 +193,7 @@ export default function DashboardPage() {
     const timer = window.setTimeout(() => {
       setSuccessMessage("");
       window.history.replaceState({}, "", "/dashboard");
-    }, 4000);
+    }, 6000);
 
     return () => window.clearTimeout(timer);
   }, []);
@@ -295,8 +286,17 @@ export default function DashboardPage() {
 
   const latestReport =
     chronologicalReports[chronologicalReports.length - 1] ?? null;
-  const previousReport =
-    chronologicalReports[chronologicalReports.length - 2] ?? null;
+
+  const previousReport = useMemo(() => {
+    if (!latestReport) return null;
+
+    const neighbors = getChronologicalNeighbors(
+      chronologicalReports,
+      latestReport.id
+    );
+
+    return neighbors.previous ?? null;
+  }, [chronologicalReports, latestReport]);
 
   const currentYear = useMemo(() => {
     if (!latestReport) return new Date().getFullYear();
@@ -315,19 +315,14 @@ export default function DashboardPage() {
     );
   }, [chronologicalReports, currentYear]);
 
-  const monthComparison = useMemo(() => {
-    return getMonthComparisonSummary(latestReport, previousReport);
+  const comparisonMetrics = useMemo(() => {
+    return buildComparisonMetrics(latestReport, previousReport);
   }, [latestReport, previousReport]);
 
-  const recentAverage = useMemo(() => {
-    if (!recentComparableReports.length) return null;
+  const comparisonSummary = useMemo(() => {
+    return getComparisonSummary(latestReport, previousReport);
+  }, [latestReport, previousReport]);
 
-    const total = recentComparableReports.reduce((sum, report) => {
-      return sum + (report.total_emissions ?? 0);
-    }, 0);
-
-    return total / recentComparableReports.length;
-  }, [recentComparableReports]);
 
   const bestPeriod = useMemo(() => {
     const comparable = chronologicalReports.filter(
@@ -354,6 +349,7 @@ export default function DashboardPage() {
       return currentValue > worstValue ? current : worst;
     });
   }, [chronologicalReports]);
+
 
   const yearSummary = useMemo(() => {
     if (!yearReports.length) {
@@ -388,9 +384,9 @@ export default function DashboardPage() {
   }, [yearReports]);
 
   const metrics = useMemo(() => {
-    const latestTotal = latestReport?.total_emissions ?? 0;
-    const latestScope1 = latestReport?.scope1_emissions ?? 0;
-    const latestScope2 = latestReport?.scope2_emissions ?? 0;
+    const latestTotal = latestReport?.total_emissions ?? null;
+    const latestScope1 = latestReport?.scope1_emissions ?? null;
+    const latestScope2 = latestReport?.scope2_emissions ?? null;
     const latestEmployees = latestReport?.employee_count ?? null;
     const latestElectricity = latestReport?.electricity_kwh ?? null;
     const latestFuel = latestReport?.fuel_liters ?? null;
@@ -400,7 +396,7 @@ export default function DashboardPage() {
         (report) =>
           report.id !== latestReport?.id && report.total_emissions != null
       )
-      .slice(-3);
+      .slice(-6);
 
     const intelligence = buildReportIntelligence(
       latestReport,
@@ -408,7 +404,8 @@ export default function DashboardPage() {
       comparisonHistory
     );
 
-    const intensityBand = intelligence.intensityBand ?? getIntensityBand(intelligence.perEmployee);
+    const intensityBand =
+      intelligence.intensityBand ?? getIntensityBand(intelligence.perEmployee);
 
     return {
       latestTotal,
@@ -423,9 +420,35 @@ export default function DashboardPage() {
       dominantSource: intelligence.dominantSource,
       coverageLabel: intelligence.coverage,
       benchmarkLabel: intelligence.benchmarkSummary,
+      benchmarkPosition: intelligence.benchmarkPositionSignal,
+      benchmarkDepthSignal: intelligence.benchmarkDepthSignal,
+      bestMonthReference: intelligence.bestMonthReference,
+      baselineWindow: intelligence.baselineWindow,
       baselineComparison: intelligence.baselineComparison,
+      anomalySignal: intelligence.anomalySignal,
+      sourceWatchout: intelligence.sourceWatchout,
+      consistencySignal: intelligence.consistencySignal,
+      managementSignal: intelligence.managementSignal,
+      recentPositionSignal: intelligence.recentPositionSignal,
+      deteriorationStreakSignal: intelligence.deteriorationStreakSignal,
+      persistentSourceSignal: intelligence.persistentSourceSignal,
+      recentTrajectorySignal: intelligence.recentTrajectorySignal,
+      recoveryProgressSignal: intelligence.recoveryProgressSignal,
+      changeDriverSignal: intelligence.changeDriverSignal,
+      opportunitySignal: intelligence.opportunitySignal,
       executiveSummary: intelligence.executiveSummary,
       recommendedActions: intelligence.recommendedActions,
+      priorityActions: intelligence.priorityActions,
+      biggestOpportunity: intelligence.biggestOpportunity,
+      improvedAreas: intelligence.improvedAreas,
+      watchAreas: intelligence.watchAreas,
+      nextBestStep: intelligence.nextBestStep,
+      assessmentCount: chronologicalReports.length,
+      isSingleAssessment: chronologicalReports.length === 1,
+      firstMonthSummary:
+        chronologicalReports.length === 1
+          ? "This is your first month of data. Use it as a starting point and add one more completed month to unlock stronger comparisons."
+          : intelligence.executiveSummary,
     };
   }, [latestReport, previousReport, chronologicalReports]);
 
@@ -526,8 +549,11 @@ export default function DashboardPage() {
     };
   }, [chartData]);
 
+  const showFirstSuccessSpotlight = Boolean(successMessage && latestReport);
+
   if (loading) {
-    return (
+
+  return (
       <div className="dashboard-page">
         <div className="page-header">
           <div>
@@ -550,6 +576,324 @@ export default function DashboardPage() {
             <p>Loading KPI cards...</p>
           </Card>
         </div>
+      </div>
+    );
+  }
+
+  const recentAverageDisplay =
+    latestReport?.total_emissions != null &&
+    metrics.benchmarkPosition.deltaToAverage != null
+      ? latestReport.total_emissions - metrics.benchmarkPosition.deltaToAverage
+      : null;
+
+  if (!latestReport) {
+    return (
+      <div className="dashboard-page">
+        <div className="page-header">
+          <div>
+            <h1>Dashboard</h1>
+            <p>
+              Start your first assessment to unlock reports, comparisons, and
+              month-by-month carbon tracking.
+            </p>
+          </div>
+
+          <div className="page-actions">
+            <Link href="/dashboard/assessment" className="button button-primary">
+              Start First Assessment
+            </Link>
+            <Link href="/dashboard/reports" className="button button-secondary">
+              View Reports
+            </Link>
+          </div>
+        </div>
+
+        <div className="workflow-strip">
+          <span className="workflow-strip-label">Quick navigation</span>
+          <div className="workflow-strip-links">
+            <Link
+              href="/dashboard"
+              className="workflow-strip-link workflow-strip-link--current"
+            >
+              Dashboard
+            </Link>
+            <Link href="/dashboard/assessment" className="workflow-strip-link">
+              New Assessment
+            </Link>
+            <Link href="/dashboard/monthly-tracker" className="workflow-strip-link">
+              Monthly Tracker
+            </Link>
+            <Link href="/dashboard/reports" className="workflow-strip-link">
+              Reports
+            </Link>
+          </div>
+        </div>
+
+        {successMessage ? (
+          <div className="status-banner status-banner-success status-banner-actionable">
+            <div className="status-banner-copy">{successMessage}</div>
+            <div className="status-banner-actions">
+              <Link href="/dashboard/reports" className="button button-secondary">
+                View Reports
+              </Link>
+              <Link
+                href="/dashboard/monthly-tracker"
+                className="button button-secondary"
+              >
+                Open Monthly Tracker
+              </Link>
+              <Link
+                href="/dashboard/assessment"
+                className="button button-primary"
+              >
+                New Assessment
+              </Link>
+            </div>
+          </div>
+        ) : null}
+
+        {error ? (
+          <Card>
+            <p>{error}</p>
+          </Card>
+        ) : null}
+
+        <section className="dashboard-onboarding-hero">
+          <div className="dashboard-onboarding-copy">
+            <p className="dashboard-onboarding-eyebrow">Getting started</p>
+            <h2>Build your first carbon baseline in one short assessment.</h2>
+            <p className="dashboard-onboarding-lead">
+              Enter your reporting month, employee count, electricity use, and
+              fuel use. Carbon Accounting Pro will calculate Scope 1 and Scope 2
+              emissions, generate a report, and prepare your business for
+              month-vs-month tracking.
+            </p>
+
+            <div className="dashboard-onboarding-actions">
+              <Link
+                href="/dashboard/assessment"
+                className="button button-primary"
+              >
+                Start First Assessment
+              </Link>
+              <Link href="/dashboard/reports" className="button button-secondary">
+                See Where Reports Appear
+              </Link>
+            </div>
+          </div>
+
+          <div className="dashboard-onboarding-checklist">
+            <div className="dashboard-onboarding-checklist-card">
+              <strong>What you need</strong>
+              <ul className="recommendation-list recommendation-list--compact">
+                <li>Reporting month and year</li>
+                <li>Employee count</li>
+                <li>Electricity consumption</li>
+                <li>Fuel consumption</li>
+              </ul>
+            </div>
+
+            <div className="dashboard-onboarding-checklist-card">
+              <strong>What you get</strong>
+              <ul className="recommendation-list recommendation-list--compact">
+                <li>Calculated Scope 1 and Scope 2 emissions</li>
+                <li>A downloadable PDF report</li>
+                <li>Dashboard KPIs and summary insights</li>
+                <li>A clean baseline for future comparisons</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <div className="dashboard-onboarding-steps">
+          <div className="dashboard-onboarding-step">
+            <span className="dashboard-onboarding-step-number">1</span>
+            <div>
+              <strong>Add your first month</strong>
+              <p>
+                Complete one assessment to create your first emissions snapshot
+                and report.
+              </p>
+            </div>
+          </div>
+
+          <div className="dashboard-onboarding-step">
+            <span className="dashboard-onboarding-step-number">2</span>
+            <div>
+              <strong>Review your report</strong>
+              <p>
+                Open the generated report to see totals, methodology basis,
+                performance summary, and recommendations.
+              </p>
+            </div>
+          </div>
+
+          <div className="dashboard-onboarding-step">
+            <span className="dashboard-onboarding-step-number">3</span>
+            <div>
+              <strong>Keep reporting monthly</strong>
+              <p>
+                Add another month to unlock stronger trends, comparison
+                snapshots, baselines, and more useful decision signals.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="dashboard-grid dashboard-grid--kpis">
+          <Card>
+            <div className="kpi-card">
+              <p className="kpi-label">Total Emissions</p>
+              <div className="kpi-figure">
+                <span className="kpi-number">—</span>
+              </div>
+              <p className="kpi-subtext">Appears after your first assessment</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="kpi-card">
+              <p className="kpi-label">Scope 1 Emissions</p>
+              <div className="kpi-figure">
+                <span className="kpi-number">—</span>
+              </div>
+              <p className="kpi-subtext">Direct fuel emissions summary</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="kpi-card">
+              <p className="kpi-label">Scope 2 Emissions</p>
+              <div className="kpi-figure">
+                <span className="kpi-number">—</span>
+              </div>
+              <p className="kpi-subtext">Purchased electricity emissions summary</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="kpi-card">
+              <p className="kpi-label">Emissions / Employee</p>
+              <div className="kpi-figure">
+                <span className="kpi-number">—</span>
+              </div>
+              <p className="kpi-subtext">
+                Unlocks when employee count is included
+              </p>
+            </div>
+          </Card>
+        </div>
+
+        <div className="dashboard-grid dashboard-grid--main">
+          <Card>
+            <div className="section-header">
+              <div>
+                <h3>What improves after month two</h3>
+                <p className="chart-meta-label">
+                  Monthly consistency makes comparisons and guidance more useful.
+                </p>
+              </div>
+            </div>
+
+            <div className="insights-list">
+              <div className="insight-item">
+                <strong>Comparison signals</strong>
+                <p>
+                  After your second month, the dashboard can compare changes,
+                  surface stronger patterns, and give more useful decision support.
+                </p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Benchmark context</strong>
+                <p>
+                  Repeated reporting periods make benchmark position, trend
+                  direction, and management signals more reliable.
+                </p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Action guidance</strong>
+                <p>
+                  As history builds, the product can give clearer next-step
+                  guidance instead of only a starting baseline.
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="section-header">
+              <div>
+                <h3>Where your outputs appear</h3>
+                <p className="chart-meta-label">
+                  The same data powers the rest of the product.
+                </p>
+              </div>
+            </div>
+
+            <div className="insights-list">
+              <div className="insight-item">
+                <strong>Reports</strong>
+                <p>
+                  Each assessment creates a detailed report with PDF export and
+                  executive-style summary sections.
+                </p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Monthly Tracker</strong>
+                <p>
+                  Over time, this becomes your quick month-vs-month view across
+                  reporting periods.
+                </p>
+              </div>
+
+              <div className="insight-item">
+                <strong>Dashboard</strong>
+                <p>
+                  This page will surface KPIs, trend summaries, intensity
+                  signals, and recommended next actions.
+                </p>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        <Card>
+          <div className="section-header">
+            <div>
+              <h3>Why monthly consistency matters</h3>
+              <p className="chart-meta-label">
+                One month creates a baseline. Repeated months create decision value.
+              </p>
+            </div>
+          </div>
+
+          <div className="dashboard-onboarding-benefits">
+            <div className="dashboard-onboarding-benefit">
+              <strong>Stronger comparisons</strong>
+              <p>
+                You can measure whether emissions are rising, falling, or staying
+                close to recent operating patterns.
+              </p>
+            </div>
+            <div className="dashboard-onboarding-benefit">
+              <strong>Better recommendations</strong>
+              <p>
+                Actions become more specific when the product can combine trend,
+                intensity, and dominant-source signals.
+              </p>
+            </div>
+            <div className="dashboard-onboarding-benefit">
+              <strong>Cleaner reporting rhythm</strong>
+              <p>
+                A regular monthly cadence makes stakeholder reporting and future
+                ESG workflows easier to manage.
+              </p>
+            </div>
+          </div>
+        </Card>
       </div>
     );
   }
@@ -578,7 +922,10 @@ export default function DashboardPage() {
       <div className="workflow-strip">
         <span className="workflow-strip-label">Quick navigation</span>
         <div className="workflow-strip-links">
-          <Link href="/dashboard" className="workflow-strip-link workflow-strip-link--current">
+          <Link
+            href="/dashboard"
+            className="workflow-strip-link workflow-strip-link--current"
+          >
             Dashboard
           </Link>
           <Link href="/dashboard/assessment" className="workflow-strip-link">
@@ -600,11 +947,72 @@ export default function DashboardPage() {
             <Link href="/dashboard/reports" className="button button-secondary">
               View Reports
             </Link>
-            <Link href="/dashboard/monthly-tracker" className="button button-secondary">
+            <Link
+              href="/dashboard/monthly-tracker"
+              className="button button-secondary"
+            >
               Open Monthly Tracker
             </Link>
             <Link href="/dashboard/assessment" className="button button-primary">
               New Assessment
+            </Link>
+          </div>
+        </div>
+      ) : null}
+
+      {showFirstSuccessSpotlight ? (
+        <div className="first-success-spotlight">
+          <div className="first-success-spotlight-copy">
+            <p className="first-success-spotlight-eyebrow">Assessment saved</p>
+            <h2>Your latest carbon report is ready.</h2>
+            <p>
+              This reporting month is now live across Dashboard, Reports, and
+              Monthly Tracker. Use the report now, then add the next month later
+              to unlock stronger comparisons and more reliable baseline context.
+            </p>
+          </div>
+
+          <div className="first-success-spotlight-grid">
+            <div className="first-success-spotlight-card">
+              <span className="first-success-spotlight-label">Latest month</span>
+              <strong>
+                {latestReport?.period_label ||
+                  latestReport?.reporting_period ||
+                  "Latest assessment"}
+              </strong>
+            </div>
+
+            <div className="first-success-spotlight-card">
+              <span className="first-success-spotlight-label">Total emissions</span>
+              <strong>{formatKgFull(latestReport?.total_emissions)}</strong>
+            </div>
+
+            <div className="first-success-spotlight-card">
+              <span className="first-success-spotlight-label">Next unlock</span>
+              <strong>Month-vs-month comparison</strong>
+            </div>
+          </div>
+
+          <div className="first-success-spotlight-actions">
+            <Link
+              href={`/dashboard/reports/${latestReport?.id}`}
+              className="button button-primary"
+            >
+              Open Latest Report
+            </Link>
+            <a
+              href={`/api/reports/${latestReport?.id}/pdf`}
+              target="_blank"
+              rel="noreferrer"
+              className="button button-secondary"
+            >
+              Download PDF
+            </a>
+            <Link
+              href="/dashboard/assessment"
+              className="button button-secondary"
+            >
+              Add Another Month
             </Link>
           </div>
         </div>
@@ -628,10 +1036,7 @@ export default function DashboardPage() {
               </strong>
               .
             </p>
-            <p>
-              Your newest monthly submission is now reflected across Dashboard,
-              Reports, and Monthly Tracker.
-            </p>
+            <p>{metrics.isSingleAssessment ? metrics.firstMonthSummary : metrics.executiveSummary}</p>
 
             <div className="latest-report-summary-metrics">
               <div className="latest-report-summary-metric">
@@ -639,7 +1044,9 @@ export default function DashboardPage() {
                 <strong>{formatKgFull(latestReport.total_emissions)}</strong>
               </div>
               <div className="latest-report-summary-metric">
-                <span className="latest-report-summary-label">Emissions / employee</span>
+                <span className="latest-report-summary-label">
+                  Emissions / employee
+                </span>
                 <strong>
                   {formatKgFull(
                     getPerEmployee(
@@ -683,6 +1090,131 @@ export default function DashboardPage() {
         </Card>
       ) : null}
 
+      {latestReport && previousReport ? (
+        <section className="dashboard-grid dashboard-grid--main">
+          <Card>
+            <div className="section-header">
+              <div>
+                <h3>Comparison Snapshot</h3>
+                <p className="chart-meta-label">
+                  Latest reporting month vs previous chronological month.
+                </p>
+              </div>
+            </div>
+
+            <div className="details-list">
+              <div className="details-row">
+                <span>Comparing</span>
+                <strong>
+                  {latestReport.period_label ||
+                    latestReport.reporting_period ||
+                    "Latest month"}{" "}
+                  vs{" "}
+                  {previousReport.period_label ||
+                    previousReport.reporting_period ||
+                    "Previous month"}
+                </strong>
+              </div>
+
+              <div className="details-row">
+                <span>Total emissions</span>
+                <strong>
+                  <span
+                    className={getSignalToneClass(
+                      comparisonMetrics?.totalEmissions.tone ?? "neutral"
+                    )}
+                  >
+                    {comparisonMetrics?.totalEmissions.delta == null
+                      ? "No assessment yet"
+                      : `${formatDashboardDelta(
+                          comparisonMetrics.totalEmissions.delta
+                        )} kg CO₂e`}
+                  </span>
+                </strong>
+              </div>
+
+              <div className="details-row">
+                <span>Current emissions / employee</span>
+                <strong>
+                  {metrics.perEmployee == null
+                    ? "—"
+                    : `${formatNumber(metrics.perEmployee, 2)} kg CO₂e`}
+                </strong>
+              </div>
+
+              <div className="details-row">
+                <span>Dominant source</span>
+                <strong>
+                  {metrics.dominantSource.label === "Balanced"
+                    ? "Balanced"
+                    : metrics.dominantSource.label}
+                </strong>
+              </div>
+
+              <div className="details-row">
+                <span>Direction</span>
+                <strong>
+                  <span className={getSignalToneClass(metrics.trend.tone)}>
+                    {metrics.trend.label}
+                  </span>
+                </strong>
+              </div>
+
+              <div className="details-row">
+                <span>Normal vs unusual</span>
+                <strong>
+                  <span className={getSignalToneClass(metrics.anomalySignal.tone)}>
+                    {metrics.anomalySignal.label}
+                  </span>
+                </strong>
+              </div>
+
+              <div className="details-row">
+                <span>Main watchout</span>
+                <strong>{metrics.sourceWatchout.label}</strong>
+              </div>
+
+              <div className="details-row">
+                <span>Recovery progress</span>
+                <strong>
+                  <span className={getSignalToneClass(metrics.recoveryProgressSignal.tone)}>
+                    {metrics.recoveryProgressSignal.label}
+                  </span>
+                </strong>
+              </div>
+            </div>
+          </Card>
+
+          <div className="comparison-mini-panels">
+            <div className="comparison-mini-panel">
+              <strong>{comparisonSummary?.title || "Comparison summary"}</strong>
+              <p>
+                {comparisonSummary?.summary ||
+                  "Add at least two completed reporting months to compare month-over-month performance."}
+              </p>
+              {comparisonSummary?.action ? (
+                <p className="chart-meta-label" style={{ marginTop: "8px" }}>
+                  {comparisonSummary.action}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="comparison-mini-panel">
+              <strong>Recent baseline</strong>
+              <p>{tightenDashboardBaselineSummary(metrics.baselineComparison.summary)}</p>
+            </div>
+
+            <div className="comparison-mini-panel">
+              <strong>Main watchout</strong>
+              <p>{tightenDashboardWatchout(metrics.sourceWatchout.summary)}</p>
+              <p className="chart-meta-label" style={{ marginTop: "8px" }}>
+                {metrics.sourceWatchout.action}
+              </p>
+            </div>
+          </div>
+        </section>
+      ) : null}
+
       <div className="dashboard-grid dashboard-grid--kpis">
         <Card>
           <div className="kpi-card">
@@ -694,7 +1226,7 @@ export default function DashboardPage() {
             <p className="kpi-subtext">
               {latestReport?.period_label ||
                 latestReport?.reporting_period ||
-                "No reporting month"}
+                "No assessment yet"}
             </p>
           </div>
         </Card>
@@ -708,7 +1240,11 @@ export default function DashboardPage() {
               </span>
               <span className="kpi-unit">kg CO₂e</span>
             </div>
-            <p className="kpi-subtext">Fuel-based direct emissions</p>
+            <p className="kpi-subtext">
+              {latestReport?.period_label ||
+                latestReport?.reporting_period ||
+                "No assessment yet"}
+            </p>
           </div>
         </Card>
 
@@ -721,7 +1257,11 @@ export default function DashboardPage() {
               </span>
               <span className="kpi-unit">kg CO₂e</span>
             </div>
-            <p className="kpi-subtext">Purchased electricity emissions</p>
+            <p className="kpi-subtext">
+              {latestReport?.period_label ||
+                latestReport?.reporting_period ||
+                "No assessment yet"}
+            </p>
           </div>
         </Card>
 
@@ -761,31 +1301,25 @@ export default function DashboardPage() {
             <p className="kpi-label">Change vs Previous</p>
             <div className="kpi-figure">
               <span className="kpi-number">
-                {monthComparison.absoluteDelta == null
+                {comparisonMetrics?.totalEmissions.delta == null
                   ? "—"
-                  : monthComparison.absoluteDelta > 0
-                  ? `+${formatKgValue(monthComparison.absoluteDelta)}`
-                  : monthComparison.absoluteDelta < 0
-                  ? `-${formatKgValue(Math.abs(monthComparison.absoluteDelta))}`
+                  : comparisonMetrics.totalEmissions.delta > 0
+                  ? formatDashboardDelta(comparisonMetrics.totalEmissions.delta)
+                  : comparisonMetrics.totalEmissions.delta < 0
+                  ? formatDashboardDelta(comparisonMetrics.totalEmissions.delta)
                   : "0"}
               </span>
-              {monthComparison.absoluteDelta != null ? (
+              {comparisonMetrics?.totalEmissions.delta != null ? (
                 <span className="kpi-unit">kg CO₂e</span>
               ) : null}
             </div>
-            <p className="kpi-subtext">
-              {monthComparison.percentDelta != null ? (
-                <span className={getSignalToneClass(monthComparison.tone)}>
-                  {monthComparison.label} ·{" "}
-                  {monthComparison.percentDelta > 0 ? "+" : ""}
-                  {formatNumber(monthComparison.percentDelta, 1)}%
-                </span>
-              ) : (
-                <span className={getSignalToneClass(monthComparison.tone)}>
-                  {monthComparison.label}
-                </span>
+            <span
+              className={getSignalToneClass(
+                comparisonMetrics?.totalEmissions.tone ?? "neutral"
               )}
-            </p>
+            >
+              {comparisonMetrics?.totalEmissions.changeLabel || "No assessment yet"}
+            </span>
           </div>
         </Card>
 
@@ -794,9 +1328,9 @@ export default function DashboardPage() {
             <p className="kpi-label">Recent Average</p>
             <div className="kpi-figure">
               <span className="kpi-number">
-                {recentAverage == null ? "—" : formatKgValue(recentAverage)}
+                {recentAverageDisplay == null ? "—" : formatKgValue(recentAverageDisplay)}
               </span>
-              {recentAverage != null ? (
+              {recentAverageDisplay != null ? (
                 <span className="kpi-unit">kg CO₂e</span>
               ) : null}
             </div>
@@ -1054,98 +1588,143 @@ export default function DashboardPage() {
             <h3>Latest Assessment</h3>
           </div>
 
-          {latestReport ? (
-            <div className="details-list">
-              <div className="details-row">
-                <span>Reporting Month</span>
-                <strong>
-                  {latestReport.period_label ||
-                    latestReport.reporting_period ||
-                    "—"}
-                </strong>
-              </div>
-              <div className="details-row">
-                <span>Employees</span>
-                <strong>{formatWhole(latestReport.employee_count)}</strong>
-              </div>
-              <div className="details-row">
-                <span>Electricity Use</span>
-                <strong>{formatKwh(metrics.latestElectricity)}</strong>
-              </div>
-              <div className="details-row">
-                <span>Fuel Use</span>
-                <strong>{formatLiters(metrics.latestFuel)}</strong>
-              </div>
-              <div className="details-row">
-                <span>Total Emissions</span>
-                <strong>{formatKgFull(latestReport.total_emissions)}</strong>
-              </div>
-              <div className="details-row">
-                <span>Emissions / Employee</span>
-                <strong>
-                  {metrics.perEmployee == null
-                    ? "—"
-                    : `${formatNumber(metrics.perEmployee, 2)} kg CO₂e`}
-                </strong>
-              </div>
-              <div className="details-row">
-                <span>Trend Direction</span>
-                <strong>
-                  <span className={getSignalToneClass(metrics.trend.tone)}>
-                    {metrics.trend.label}
-                  </span>
-                </strong>
-              </div>
-              <div className="details-row">
-                <span>Dominant Source</span>
-                <strong>{metrics.dominantSource.label}</strong>
-              </div>
-              <div className="details-row">
-                <span>Vs Previous Month</span>
-                <strong>
-                  <span className={getSignalToneClass(monthComparison.tone)}>
-                    {monthComparison.absoluteDelta == null
-                      ? "No comparison yet"
-                      : monthComparison.absoluteDelta > 0
-                      ? `+${formatKgValue(monthComparison.absoluteDelta)} kg CO₂e`
-                      : monthComparison.absoluteDelta < 0
-                      ? `-${formatKgValue(
-                          Math.abs(monthComparison.absoluteDelta)
-                        )} kg CO₂e`
-                      : "No change"}
-                  </span>
-                </strong>
-              </div>
+          <div className="details-list">
+            <div className="details-row">
+              <span>Reporting Month</span>
+              <strong>
+                {latestReport.period_label || latestReport.reporting_period || "—"}
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Employees</span>
+              <strong>{formatWhole(latestReport.employee_count)}</strong>
+            </div>
+            <div className="details-row">
+              <span>Electricity Use</span>
+              <strong>{formatKwh(metrics.latestElectricity)}</strong>
+            </div>
+            <div className="details-row">
+              <span>Fuel Use</span>
+              <strong>{formatLiters(metrics.latestFuel)}</strong>
+            </div>
+            <div className="details-row">
+              <span>Total Emissions</span>
+              <strong>{formatKgFull(latestReport.total_emissions)}</strong>
+            </div>
+            <div className="details-row">
+              <span>Emissions / Employee</span>
+              <strong>
+                {metrics.perEmployee == null
+                  ? "—"
+                  : `${formatNumber(metrics.perEmployee, 2)} kg CO₂e`}
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Trend Direction</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.trend.tone)}>
+                  {metrics.trend.label}
+                </span>
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Dominant Source</span>
+              <strong>{metrics.dominantSource.label}</strong>
+            </div>
+            <div className="details-row">
+              <span>Normal vs unusual</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.anomalySignal.tone)}>
+                  {metrics.anomalySignal.label}
+                </span>
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Main watchout</span>
+              <strong>{metrics.sourceWatchout.label}</strong>
+            </div>
+            <div className="details-row">
+              <span>Management read</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.managementSignal.tone)}>
+                  {metrics.managementSignal.label}
+                </span>
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Recent pattern</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.consistencySignal.tone)}>
+                  {metrics.consistencySignal.label}
+                </span>
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Recent position</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.recentPositionSignal.tone)}>
+                  {metrics.recentPositionSignal.label}
+                </span>
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Performance streak</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.deteriorationStreakSignal.tone)}>
+                  {metrics.deteriorationStreakSignal.label}
+                </span>
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Recovery progress</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.recoveryProgressSignal.tone)}>
+                  {metrics.recoveryProgressSignal.label}
+                </span>
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Change driver</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.changeDriverSignal.tone)}>
+                  {metrics.changeDriverSignal.label}
+                </span>
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Biggest opportunity</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.opportunitySignal.tone)}>
+                  {metrics.opportunitySignal.label}
+                </span>
+              </strong>
+            </div>
+            <div className="details-row">
+              <span>Vs Previous Month</span>
+              <strong>
+                <span className={getSignalToneClass(comparisonMetrics?.totalEmissions.tone ?? "neutral")}>
+                  {comparisonMetrics?.totalEmissions.delta == null
+                    ? "No assessment yet"
+                    : comparisonMetrics.totalEmissions.delta > 0
+                    ? `+${formatKgValue(comparisonMetrics.totalEmissions.delta)} kg CO₂e`
+                    : comparisonMetrics.totalEmissions.delta < 0
+                    ? `-${formatKgValue(
+                        Math.abs(comparisonMetrics.totalEmissions.delta)
+                      )} kg CO₂e`
+                    : "No change"}
+                </span>
+              </strong>
+            </div>
 
-              <div className="section-actions">
-                <Link
-                  href={`/dashboard/reports/${latestReport.id}`}
-                  className="button button-secondary"
-                >
-                  Open Latest Report
-                </Link>
-              </div>
-            </div>
-          ) : (
-            <div className="empty-state">
-              <p>No monthly assessments yet.</p>
-              <p>
-                Start your first monthly assessment to generate a report, track
-                emissions over time, and unlock benchmarking, trends, and PDF export.
-              </p>
-              <div
-                className="page-actions"
-                style={{ justifyContent: "center", marginTop: "12px" }}
+            <div className="section-actions">
+              <Link
+                href={`/dashboard/reports/${latestReport.id}`}
+                className="button button-secondary"
               >
-                <Link href="/dashboard/assessment" className="button button-primary">
-                  Start First Monthly Assessment
-                </Link>
-                <Link href="/dashboard/reports" className="button button-secondary">
-                  View Reports
-                </Link>
-              </div>
+                Open Latest Report
+              </Link>
             </div>
-          )}
+          </div>
         </Card>
 
         <Card>
@@ -1153,69 +1732,334 @@ export default function DashboardPage() {
             <h3>Insights</h3>
           </div>
 
-          {latestReport ? (
-            <div className="insights-list">
-              <div className="insight-item">
-                <strong>Executive summary</strong>
-                <p>{metrics.executiveSummary}</p>
-              </div>
-
-              <div className="insight-item">
-                <strong>
-                  Trend{" "}
-                  <span className={getSignalToneClass(metrics.trend.tone)}>
-                    {metrics.trend.label}
-                  </span>
-                </strong>
-                <p>{metrics.trend.summary}</p>
-              </div>
-
-              <div className="insight-item">
-                <strong>Monthly comparison</strong>
-                <p>{monthComparison.summary}</p>
-              </div>
-
-              <div className="insight-item">
-                <strong>
-                  Benchmark{" "}
-                  {metrics.intensityBand ? (
-                    <span className={getIntensityToneClass(metrics.intensityBand.tone)}>
-                      {metrics.intensityBand.label}
-                    </span>
-                  ) : null}
-                </strong>
-                <p>{metrics.benchmarkLabel}</p>
-              </div>
-
-              <div className="insight-item">
-                <strong>Dominant source</strong>
-                <p>{metrics.dominantSource.summary}</p>
-              </div>
-
-              <div className="insight-item">
-                <strong>Recent baseline</strong>
-                <p>{metrics.baselineComparison.summary}</p>
-              </div>
-
-              <div className="insight-item">
-                <strong>Input coverage</strong>
-                <p>{metrics.coverageLabel}</p>
-              </div>
-
-              <div className="insight-item">
-                <strong>Recommended next actions</strong>
-                <ul className="recommendation-list">
-                  {metrics.recommendedActions.map((item, index) => (
-                    <li key={`dashboard-action-${index}`}>{item}</li>
-                  ))}
-                </ul>
-              </div>
+          <div className="details-list" style={{ marginBottom: "16px" }}>
+            <div className="details-row">
+              <span>Change</span>
+              <strong>
+                <span className={getSignalToneClass(comparisonMetrics?.totalEmissions.tone ?? "neutral")}>
+                  {comparisonMetrics?.totalEmissions.delta == null
+                    ? "No assessment yet"
+                    : comparisonMetrics.totalEmissions.delta > 0
+                    ? `Up ${formatKgValue(comparisonMetrics.totalEmissions.delta)} kg CO₂e vs previous month`
+                    : comparisonMetrics.totalEmissions.delta < 0
+                    ? `Down ${formatKgValue(
+                        Math.abs(comparisonMetrics.totalEmissions.delta)
+                      )} kg CO₂e vs previous month`
+                    : "No material change vs previous month"}
+                </span>
+              </strong>
             </div>
-          ) : (
-            <p>Complete an assessment to unlock dashboard insights.</p>
-          )}
+
+            <div className="details-row">
+              <span>Why</span>
+              <strong>
+                {metrics.anomalySignal.label} · {metrics.sourceWatchout.label}
+              </strong>
+            </div>
+
+            <div className="details-row">
+              <span>Management read</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.managementSignal.tone)}>
+                  {metrics.managementSignal.label}
+                </span>
+              </strong>
+            </div>
+
+            <div className="details-row">
+              <span>Recent pattern</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.consistencySignal.tone)}>
+                  {metrics.consistencySignal.label}
+                </span>
+              </strong>
+            </div>
+
+            <div className="details-row">
+              <span>Recovery progress</span>
+              <strong>
+                <span className={getSignalToneClass(metrics.recoveryProgressSignal.tone)}>
+                  {metrics.recoveryProgressSignal.label}
+                </span>
+              </strong>
+            </div>
+
+            <div className="details-row">
+              <span>First move</span>
+              <strong>
+                {tightenDashboardAction(
+                  metrics.recommendedActions[0] ||
+                    "Keep monitoring the latest month."
+                )}
+              </strong>
+            </div>
+
+            <div className="details-row">
+              <span>Position</span>
+              <strong>
+                {metrics.trend.label}
+                {metrics.intensityBand
+                  ? ` · ${metrics.intensityBand.label} intensity`
+                  : ""}
+              </strong>
+            </div>
+          </div>
+
         </Card>
+
+          <Card>
+            <div className="stack-sm">
+              <h3>{metrics.isSingleAssessment ? "What to do next" : "Priority Actions"}</h3>
+
+              {metrics.isSingleAssessment ? (
+                <>
+                  <p>
+                    <strong>Main source:</strong>{" "}
+                    {metrics.dominantSource?.label || "Review your largest source first."}
+                  </p>
+                  <p>
+                    <strong>First move:</strong>{" "}
+                    {metrics.nextBestStep ||
+                      "Keep inputs and period labels consistent so the next month gives you a stronger comparison."}
+                  </p>
+                  <p>
+                    <strong>Unlock next:</strong> Add one more completed month to unlock stronger month-over-month comparisons.
+                  </p>
+                </>
+              ) : metrics.priorityActions?.length ? (
+                metrics.priorityActions.map((action, index) => (
+                  <div key={`${action.title}-${index}`} className="insight-row">
+                    <strong>{action.title}</strong>
+                    <p>{action.summary}</p>
+                  </div>
+                ))
+              ) : (
+                <p>No priority actions yet.</p>
+              )}
+
+              {!metrics.isSingleAssessment && metrics.biggestOpportunity ? (
+                <p>
+                  <strong>Biggest opportunity:</strong> {metrics.biggestOpportunity}
+                </p>
+              ) : null}
+
+              {!metrics.isSingleAssessment && metrics.nextBestStep ? (
+                <p>
+                  <strong>Next best step:</strong> {metrics.nextBestStep}
+                </p>
+              ) : null}
+            </div>
+          </Card>
+
       </div>
+
+      {!metrics.isSingleAssessment ? (
+        <section className="dashboard-grid dashboard-grid--two dashboard-insight-detail-grid">
+          <Card>
+            <div className="insight-item">
+              <strong>Executive summary</strong>
+              <p>{metrics.executiveSummary}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>
+                Trend{" "}
+                <span className={getSignalToneClass(metrics.trend.tone)}>
+                  {metrics.trend.label}
+                </span>
+              </strong>
+              <p>{metrics.trend.summary}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>{comparisonSummary?.title || "Monthly comparison"}</strong>
+              <p>
+                {comparisonSummary?.summary ||
+                  "Add at least two completed reporting months to compare month-over-month performance."}
+              </p>
+              {comparisonSummary?.action ? <p>{comparisonSummary.action}</p> : null}
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Normal vs unusual</strong>
+              <p>{metrics.anomalySignal.summary}</p>
+              <p>{metrics.anomalySignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Management read</strong>
+              <p>{metrics.managementSignal.summary}</p>
+              <p>{metrics.managementSignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Recent pattern</strong>
+              <p>{metrics.consistencySignal.summary}</p>
+              <p>{metrics.consistencySignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Recent position</strong>
+              <p>{metrics.recentPositionSignal.summary}</p>
+              <p>{metrics.recentPositionSignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Benchmark depth</strong>
+              <p>{metrics.benchmarkDepthSignal.summary}</p>
+              <p>{metrics.benchmarkDepthSignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Benchmark Position</strong>
+              <p>{metrics.benchmarkPosition.summary}</p>
+              <p>
+                <strong>Rank in history:</strong>{" "}
+                {metrics.benchmarkPosition.rank != null
+                  ? `${metrics.benchmarkPosition.rank} of ${metrics.benchmarkPosition.totalCount}`
+                  : "Not enough data"}
+              </p>
+              <p>
+                <strong>Gap to best:</strong>{" "}
+                {metrics.benchmarkPosition.deltaToBest != null
+                  ? formatKgFull(metrics.benchmarkPosition.deltaToBest)
+                  : "Not enough data"}
+              </p>
+              <p>
+                <strong>Gap to average:</strong>{" "}
+                {metrics.benchmarkPosition.deltaToAverage != null
+                  ? formatKgFull(metrics.benchmarkPosition.deltaToAverage)
+                  : "Not enough data"}
+              </p>
+              <p>{metrics.benchmarkPosition.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Vs Best Month</strong>
+              <p>{metrics.bestMonthReference.summary}</p>
+              <p>
+                <strong>Best recent month:</strong>{" "}
+                {metrics.bestMonthReference.bestMonthLabel}
+              </p>
+              <p>
+                <strong>Gap vs best:</strong>{" "}
+                {metrics.bestMonthReference.gapKg != null
+                  ? formatKgFull(metrics.bestMonthReference.gapKg)
+                  : "Not enough data"}
+              </p>
+              <p>
+                <strong>Driver:</strong>{" "}
+                {metrics.bestMonthReference.driverSignal.label}
+              </p>
+              <p>{metrics.bestMonthReference.nextStep}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Recovery Progress</strong>
+              <p>{metrics.recoveryProgressSignal.summary}</p>
+              <p>{metrics.recoveryProgressSignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Performance streak</strong>
+              <p>{metrics.deteriorationStreakSignal.summary}</p>
+              <p>{metrics.deteriorationStreakSignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Recent trajectory</strong>
+              <p>{metrics.recentTrajectorySignal.summary}</p>
+              <p>{metrics.recentTrajectorySignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Change driver</strong>
+              <p>{metrics.changeDriverSignal.summary}</p>
+              <p>{metrics.changeDriverSignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Biggest opportunity</strong>
+              <p>{metrics.opportunitySignal.summary}</p>
+              <p>{metrics.opportunitySignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Recommended next move</strong>
+              <p>{metrics.nextBestStep || metrics.recommendedActions[0] || "Keep reporting consistently and review your main source first."}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>
+                Benchmark{" "}
+                {metrics.intensityBand ? (
+                  <span className={getIntensityToneClass(metrics.intensityBand.tone)}>
+                    {metrics.intensityBand.label}
+                  </span>
+                ) : null}
+              </strong>
+              <p>{metrics.benchmarkLabel}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Dominant source</strong>
+              <p>{metrics.dominantSource.summary}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Input coverage</strong>
+              <p>{metrics.coverageLabel}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Recommended next actions</strong>
+              <ul className="recommendation-list">
+                {metrics.recommendedActions.slice(0, 2).map((item, index) => (
+                  <li key={`dashboard-action-${index}`}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          </Card>
+        </section>
+      ) : null}
 
       <Card>
         <div className="section-header">
@@ -1260,6 +2104,12 @@ export default function DashboardPage() {
                         className="report-row-action report-row-action--open"
                       >
                         Open
+                      </Link>
+                      <Link
+                        href={`/dashboard/assessment?edit=${report.id}`}
+                        className="report-row-action"
+                      >
+                        Edit
                       </Link>
                       <a
                         href={`/api/reports/${report.id}/pdf`}
