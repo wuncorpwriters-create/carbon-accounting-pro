@@ -435,6 +435,7 @@ export default function DashboardPage() {
       recentTrajectorySignal: intelligence.recentTrajectorySignal,
       recoveryProgressSignal: intelligence.recoveryProgressSignal,
       changeDriverSignal: intelligence.changeDriverSignal,
+      multiMonthSignal: intelligence.multiMonthSignal,
       opportunitySignal: intelligence.opportunitySignal,
       executiveSummary: intelligence.executiveSummary,
       recommendedActions: intelligence.recommendedActions,
@@ -1994,6 +1995,22 @@ export default function DashboardPage() {
               <strong>Recent trajectory</strong>
               <p>{metrics.recentTrajectorySignal.summary}</p>
               <p>{metrics.recentTrajectorySignal.action}</p>
+            </div>
+          </Card>
+
+          <Card>
+            <div className="insight-item">
+              <strong>Multi-month management read</strong>
+              <p>
+                <span className={getSignalToneClass(metrics.multiMonthSignal.tone)}>
+                  {metrics.multiMonthSignal.label}
+                </span>
+              </p>
+              <p>{metrics.multiMonthSignal.summary}</p>
+              <p>{metrics.multiMonthSignal.action}</p>
+              <p>
+                <strong>Window:</strong> {metrics.multiMonthSignal.windowLabel}
+              </p>
             </div>
           </Card>
 
