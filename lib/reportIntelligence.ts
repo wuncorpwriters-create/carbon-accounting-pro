@@ -4517,6 +4517,7 @@ function buildMultiMonthSignal(
   let worseningCount = 0;
   let stableCount = 0;
   const pctChanges: number[] = [];
+  const absoluteDeltas: number[] = [];
 
   for (let index = 1; index < recentSeries.length; index += 1) {
     const previous = recentSeries[index - 1];
@@ -4524,6 +4525,7 @@ function buildMultiMonthSignal(
     const delta = current - previous;
     const pct = previous > 0 ? (delta / previous) * 100 : 0;
     pctChanges.push(pct);
+    absoluteDeltas.push(Math.abs(delta));
 
     const stabilityThreshold = Math.max(previous * 0.03, 5);
 
@@ -4540,6 +4542,11 @@ function buildMultiMonthSignal(
     validHistory.reduce((sum, value) => sum + value, 0) / validHistory.length;
   const minimumHistory = Math.min(...validHistory);
   const maximumHistory = Math.max(...validHistory);
+  const historySpread = Math.max(maximumHistory - minimumHistory, 0);
+  const averageAbsoluteDelta =
+    absoluteDeltas.length > 0
+      ? absoluteDeltas.reduce((sum, value) => sum + value, 0) / absoluteDeltas.length
+      : 0;
 
   let latestPosition: MultiMonthSignal["latestPosition"] = "within-range";
   if (currentTotal < minimumHistory) latestPosition = "below-range";
@@ -4550,6 +4557,10 @@ function buildMultiMonthSignal(
       ? pctChanges.reduce((sum, value) => sum + value, 0) / pctChanges.length
       : 0;
 
+  const isVolatile =
+    averageHistory > 0 &&
+    (historySpread / averageHistory >= 0.2 || averageAbsoluteDelta / averageHistory >= 0.1);
+
   let label = "Mixed recent pattern";
   let tone: SignalTone = "neutral";
   let summary =
@@ -4558,7 +4569,10 @@ function buildMultiMonthSignal(
     "Review recent operating differences and standardize the practices behind the stronger months.";
 
   if (improvingCount > worseningCount && improvingCount >= stableCount) {
-    label = "Improving recent pattern";
+    label =
+      latestPosition === "above-range"
+        ? "Improving, but still elevated"
+        : "Improving recent pattern";
     tone = "positive";
     summary =
       latestPosition === "below-range"
@@ -4567,9 +4581,14 @@ function buildMultiMonthSignal(
           ? "Recent months are generally improving, with the latest month staying within the recent operating range."
           : "Recent months are generally improving, although the latest month still sits above the recent operating range.";
     action =
-      "Protect the operating changes behind the stronger months and make them the repeatable standard for the next cycle.";
+      latestPosition === "above-range"
+        ? "Protect the recent gains, but keep pressure on the main emissions source until the next cycle moves back into the recent range."
+        : "Protect the operating changes behind the stronger months and make them the repeatable standard for the next cycle.";
   } else if (worseningCount > improvingCount && worseningCount >= stableCount) {
-    label = "Worsening recent pattern";
+    label =
+      latestPosition === "above-range"
+        ? "Worsening and above range"
+        : "Worsening recent pattern";
     tone = "negative";
     summary =
       latestPosition === "above-range"
@@ -4580,12 +4599,32 @@ function buildMultiMonthSignal(
     action =
       "Investigate what changed across the last few months and target the source that is driving the repeated increases.";
   } else if (stableCount > improvingCount && stableCount > worseningCount) {
-    label = "Stable recent pattern";
-    tone = "neutral";
+    label =
+      latestPosition === "above-range"
+        ? "Stable, but above normal"
+        : latestPosition === "below-range"
+          ? "Stable, stronger range"
+          : "Stable recent pattern";
+    tone = latestPosition === "above-range" ? "negative" : "neutral";
     summary =
-      "Recent months are relatively stable overall, so the management opportunity is to move from consistency into deliberate reduction.";
+      latestPosition === "above-range"
+        ? "Recent months are relatively stable, but the operating level is holding above the recent normal range."
+        : latestPosition === "below-range"
+          ? "Recent months are relatively stable, and the latest month is holding below the recent operating range."
+          : "Recent months are relatively stable overall, so the management opportunity is to move from consistency into deliberate reduction.";
     action =
-      "Use the stable baseline to choose one clear reduction lever and track whether the next month moves below the normal range.";
+      latestPosition === "above-range"
+        ? "Use the stable pattern to target one clear reduction lever and bring the next month back toward the recent range."
+        : latestPosition === "below-range"
+          ? "Protect the practices behind this stronger operating level and confirm they can be repeated next cycle."
+          : "Use the stable baseline to choose one clear reduction lever and track whether the next month moves below the normal range.";
+  } else if (isVolatile) {
+    label = "Volatile recent pattern";
+    tone = "negative";
+    summary =
+      "Recent months are moving around too much to treat the latest result as a dependable new baseline.";
+    action =
+      "Investigate what is creating the month-to-month swings and standardize operating conditions before making big management assumptions.";
   }
 
   if (averageHistory <= 0) {
